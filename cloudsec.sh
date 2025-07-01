@@ -947,8 +947,10 @@ EOF
        fi
        echo ""
        
-       # Launch Prowler scan after Gemini analysis
-       launch_prowler_scan "$PROJECT_ID"
+       # Launch Prowler scan after Gemini analysis (only if not already done)
+       if [[ "$SKIP_PROWLER" != "true" ]]; then
+           launch_prowler_scan "$PROJECT_ID"
+       fi
    else
        echo -e "${RED}✗ Gemini Security scan failed. Check error messages above.${NC}"
        return 1

@@ -241,17 +241,17 @@ app.post('/api/scan', async (req, res) => {
       
       echo "Starting security assessment..."
       
-      # Execute security scans step by step
+      # Execute security scans step by step  
       echo "--- Phase: Prowler Security Scan ---"
-      if launch_prowler_scan "${PROJECT_ID}"; then
+      if launch_prowler_scan "\${PROJECT_ID}"; then
         echo "✓ Prowler scan completed"
+        echo "PROWLER_COMPLETE"
+        echo "VERTEX_PROJECT_PROMPT"
+        exit 0
       else
         echo "✗ Prowler scan failed"
         exit 1
       fi
-      
-      echo "PROWLER_COMPLETE"
-      echo "VERTEX_PROJECT_PROMPT"
     `], { 
       stdio: 'pipe',
       cwd: path.join(__dirname, '..')
@@ -355,6 +355,7 @@ app.post('/api/continue-scan', async (req, res) => {
       export LAST_EXPORT_DIR="${exportDir}"
       export LAST_EXPORT_FILE="${provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt'}"
       export HEADLESS_MODE="true"
+      export SKIP_PROWLER="true"
       
       # Source the original script functions
       source "${scriptPath}"
