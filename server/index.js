@@ -127,7 +127,9 @@ app.post('/api/export', async (req, res) => {
         PROJECT_ID: projectId || '',
         RESOURCE_GROUP: resourceGroup || '',
         HEADLESS_MODE: 'true',
-        PATH: process.env.PATH
+        PATH: process.env.PATH,
+        PROWLER_NO_BANNER: 'true',
+        PROWLER_QUIET: 'true'
       }
     });
     
@@ -286,7 +288,7 @@ app.post('/api/scan', async (req, res) => {
           type: 'vertex_project_prompt', 
           data: { message: 'Please enter GCP Project ID for Vertex AI capabilities' }
         });
-        return; // Pause execution until we get the project ID
+        // Don't return here - continue processing other output
       }
       
       broadcast({ type: 'scan_progress', data: text });
@@ -295,10 +297,12 @@ app.post('/api/scan', async (req, res) => {
     bashScript.stderr.on('data', (data) => {
       const errorText = data.toString();
       output += errorText;
+      console.log('Script stderr:', errorText); // Debug logging
       broadcast({ type: 'scan_error', data: errorText });
     });
     
     bashScript.on('close', (code) => {
+      console.log('Script completed with exit code:', code); // Debug logging
       const result = {
         success: scanSuccess && code === 0,
         output,

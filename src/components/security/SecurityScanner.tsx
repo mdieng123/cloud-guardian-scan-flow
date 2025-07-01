@@ -136,7 +136,8 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
     
     ws.on('scan_error', (data) => {
       setScanStatus('error');
-      setScanOutput(prev => prev + 'ERROR: ' + data.data + '\n');
+      const errorText = data?.data || data || 'Unknown error';
+      setScanOutput(prev => prev + 'ERROR: ' + errorText + '\n');
       
       toast({
         title: "Scan Error",
