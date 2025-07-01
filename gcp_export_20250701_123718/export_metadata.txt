@@ -1,0 +1,3 @@
+Export completed at: Tue Jul  1 12:41:05 EDT 2025
+Project ID: inbound-entity-461511-j4
+TXT file location: /Users/mouhamadoudieng/cloud-guardian-scan-flow/gcp_export_20250701_123718/gcp_resources.txt

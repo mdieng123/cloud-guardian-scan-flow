@@ -259,7 +259,7 @@ app.post('/api/scan', async (req, res) => {
     
     let output = '';
     let scanSuccess = false;
-    let currentPhase = 'gemini';
+    let waitingForVertexId = false;
     
     bashScript.stdout.on('data', (data) => {
       const text = data.toString();
@@ -278,12 +278,13 @@ app.post('/api/scan', async (req, res) => {
       }
       
       // Check for success marker
-      if (text.includes('SCAN_RESULT:SUCCESS')) {
+      if (text.includes('PROWLER_COMPLETE')) {
         scanSuccess = true;
       }
       
       // Check if we need to prompt for Vertex AI project ID
       if (text.includes('VERTEX_PROJECT_PROMPT')) {
+        waitingForVertexId = true;
         broadcast({ 
           type: 'vertex_project_prompt', 
           data: { message: 'Please enter GCP Project ID for Vertex AI capabilities' }
@@ -303,6 +304,14 @@ app.post('/api/scan', async (req, res) => {
     
     bashScript.on('close', (code) => {
       console.log('Script completed with exit code:', code); // Debug logging
+      
+      // If we're waiting for Vertex ID, don't complete the scan
+      if (waitingForVertexId) {
+        console.log('Prowler phase complete, waiting for Vertex AI project ID...');
+        // Don't send scan_complete - let the frontend handle the vertex_project_prompt
+        return;
+      }
+      
       const result = {
         success: scanSuccess && code === 0,
         output,

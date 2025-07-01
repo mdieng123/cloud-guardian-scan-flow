@@ -125,12 +125,13 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
     
     ws.on('vertex_project_prompt', (data) => {
       setScanStatus('waiting_vertex_id');
-      setScanProgress(40);
-      setScanOutput(prev => prev + '\n' + data.message + '\n');
+      setScanProgress(50); // Prowler complete, halfway done
+      setCurrentPhase(null); // Clear current phase
+      setScanOutput(prev => prev + '\n✅ Prowler scan completed successfully!\n' + data.message + '\n');
       
       toast({
-        title: "Vertex AI Project ID Required",
-        description: "Please enter your GCP Project ID for Vertex AI capabilities.",
+        title: "Prowler Complete - Vertex AI Required",
+        description: "Prowler found security issues. Please enter your GCP Project ID for Vertex AI analysis.",
       });
     });
     
