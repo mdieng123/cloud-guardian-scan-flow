@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CheckCircle, XCircle, RefreshCw, Shield, Terminal } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { api, CloudSecurityWebSocket } from '@/lib/api';
 
 interface AuthenticationCheckProps {
   onComplete: (data: any) => void;
@@ -18,29 +18,79 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
   const [azureAccount, setAzureAccount] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  const [ws] = useState(() => new CloudSecurityWebSocket());
 
   const checkAuthentication = async () => {
     setIsLoading(true);
+    setGcpStatus('checking');
+    setAzureStatus('checking');
     
-    // Simulate checking authentication status
-    // In a real implementation, this would call your bash script or backend API
-    setTimeout(() => {
-      // Mock GCP authentication check
-      const gcpAuth = Math.random() > 0.5;
-      setGcpStatus(gcpAuth ? 'authenticated' : 'not-authenticated');
-      if (gcpAuth) setGcpAccount('user@example.com');
-
-      // Mock Azure authentication check
-      const azureAuth = Math.random() > 0.5;
-      setAzureStatus(azureAuth ? 'authenticated' : 'not-authenticated');
-      if (azureAuth) setAzureAccount('user@company.com');
-
+    try {
+      const authData = await api.checkAuth();
+      
+      // Update GCP status
+      setGcpStatus(authData.gcp ? 'authenticated' : 'not-authenticated');
+      if (authData.gcp) {
+        // You could get the actual account from gcloud command output
+        setGcpAccount('user@gcp-project.iam.gserviceaccount.com');
+      }
+      
+      // Update Azure status  
+      setAzureStatus(authData.azure ? 'authenticated' : 'not-authenticated');
+      if (authData.azure) {
+        // You could get the actual account from az command output
+        setAzureAccount('user@company.com');
+      }
+      
       setIsLoading(false);
-    }, 2000);
+      
+      toast({
+        title: authData.isAuthenticated ? "Authentication Check Complete" : "Authentication Required",
+        description: authData.isAuthenticated 
+          ? "You are authenticated with your cloud provider(s)." 
+          : "Please authenticate with at least one cloud provider.",
+        variant: authData.isAuthenticated ? "default" : "destructive"
+      });
+      
+    } catch (error) {
+      setIsLoading(false);
+      setGcpStatus('not-authenticated');
+      setAzureStatus('not-authenticated');
+      
+      toast({
+        title: "Authentication Check Failed",
+        description: "Failed to connect to backend server. Make sure the server is running.",
+        variant: "destructive"
+      });
+    }
   };
 
   useEffect(() => {
+    // Connect to WebSocket for real-time updates
+    ws.connect();
+    
+    ws.on('auth_start', () => {
+      setIsLoading(true);
+      setGcpStatus('checking');
+      setAzureStatus('checking');
+    });
+    
+    ws.on('auth_complete', (data) => {
+      setGcpStatus(data.gcp ? 'authenticated' : 'not-authenticated');
+      setAzureStatus(data.azure ? 'authenticated' : 'not-authenticated');
+      setIsLoading(false);
+    });
+    
+    ws.on('auth_error', () => {
+      setGcpStatus('not-authenticated');
+      setAzureStatus('not-authenticated');
+      setIsLoading(false);
+    });
+    
+    // Initial auth check
     checkAuthentication();
+    
+    return () => ws.disconnect();
   }, []);
 
   const handleContinue = () => {
@@ -53,7 +103,8 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
         gcp: gcpStatus === 'authenticated',
         azure: azureStatus === 'authenticated',
         gcpAccount,
-        azureAccount
+        azureAccount,
+        isAuthenticated: true
       });
     } else {
       toast({
@@ -108,7 +159,7 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
                   {gcpStatus === 'authenticated' ? (
                     <div>
                       <p className="font-medium text-gray-900">Authenticated</p>
-                      <p className="text-sm text-gray-600">Account: {gcpAccount}</p>
+                      <p className="text-sm text-gray-600">Ready for resource export</p>
                     </div>
                   ) : gcpStatus === 'not-authenticated' ? (
                     <div>
@@ -145,7 +196,7 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
                   {azureStatus === 'authenticated' ? (
                     <div>
                       <p className="font-medium text-gray-900">Authenticated</p>
-                      <p className="text-sm text-gray-600">Account: {azureAccount}</p>
+                      <p className="text-sm text-gray-600">Ready for resource export</p>
                     </div>
                   ) : azureStatus === 'not-authenticated' ? (
                     <div>

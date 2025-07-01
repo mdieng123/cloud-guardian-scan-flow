@@ -1,12 +1,13 @@
-
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Textarea } from '@/components/ui/textarea';
 import { Search, Shield, Zap, CheckCircle, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { api, CloudSecurityWebSocket } from '@/lib/api';
 
 interface SecurityScannerProps {
   exportData: any;
@@ -15,130 +16,144 @@ interface SecurityScannerProps {
 }
 
 const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider, onComplete }) => {
-  const [geminiStatus, setGeminiStatus] = useState<'idle' | 'running' | 'complete' | 'error'>('idle');
-  const [prowlerStatus, setProwlerStatus] = useState<'idle' | 'running' | 'complete' | 'error'>('idle');
-  const [consolidationStatus, setConsolidationStatus] = useState<'idle' | 'running' | 'complete' | 'error'>('idle');
-  const [geminiProgress, setGeminiProgress] = useState(0);
-  const [prowlerProgress, setProwlerProgress] = useState(0);
-  const [consolidationProgress, setConsolidationProgress] = useState(0);
+  const [scanStatus, setScanStatus] = useState<'idle' | 'running' | 'complete' | 'error'>('idle');
+  const [currentPhase, setCurrentPhase] = useState<'gemini' | 'prowler' | 'consolidation' | null>(null);
+  const [scanProgress, setScanProgress] = useState(0);
+  const [scanOutput, setScanOutput] = useState<string>('');
   const [scanResults, setScanResults] = useState<any>(null);
   const { toast } = useToast();
+  const [ws] = useState(() => new CloudSecurityWebSocket());
 
-  const simulateProgress = (setter: React.Dispatch<React.SetStateAction<number>>, duration: number) => {
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.random() * 10;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
+  useEffect(() => {
+    ws.connect();
+    
+    ws.on('scan_start', () => {
+      setScanStatus('running');
+      setScanProgress(0);
+      setScanOutput('Starting security assessment...\n');
+      setCurrentPhase('gemini');
+    });
+    
+    ws.on('scan_phase', (data) => {
+      setCurrentPhase(data.phase);
+      setScanOutput(prev => prev + `\n--- Starting ${data.phase} phase ---\n`);
+    });
+    
+    ws.on('scan_progress', (data) => {
+      setScanOutput(prev => prev + data.data);
+      // Update progress based on phase
+      if (currentPhase === 'gemini') {
+        setScanProgress(prev => Math.min(prev + Math.random() * 5, 33));
+      } else if (currentPhase === 'prowler') {
+        setScanProgress(prev => Math.min(prev + Math.random() * 5, 66));
+      } else if (currentPhase === 'consolidation') {
+        setScanProgress(prev => Math.min(prev + Math.random() * 5, 90));
       }
-      setter(progress);
-    }, duration / 10);
-    return interval;
-  };
-
-  const runGeminiScan = async () => {
-    setGeminiStatus('running');
-    const interval = simulateProgress(setGeminiProgress, 8000);
+    });
     
-    setTimeout(() => {
-      clearInterval(interval);
-      setGeminiProgress(100);
-      setGeminiStatus('complete');
-      toast({
-        title: "Gemini Analysis Complete",
-        description: "AI-powered security analysis finished successfully.",
-      });
-    }, 8000);
-  };
-
-  const runProwlerScan = async () => {
-    setProwlerStatus('running');
-    const interval = simulateProgress(setProwlerProgress, 12000);
-    
-    setTimeout(() => {
-      clearInterval(interval);
-      setProwlerProgress(100);
-      setProwlerStatus('complete');
-      toast({
-        title: "Prowler Scan Complete",
-        description: "Security vulnerability scan finished successfully.",
-      });
-    }, 12000);
-  };
-
-  const runConsolidation = async () => {
-    setConsolidationStatus('running');
-    const interval = simulateProgress(setConsolidationProgress, 5000);
-    
-    setTimeout(() => {
-      clearInterval(interval);
-      setConsolidationProgress(100);
-      setConsolidationStatus('complete');
+    ws.on('scan_complete', (data) => {
+      setScanProgress(100);
+      setScanStatus(data.success ? 'complete' : 'error');
+      setCurrentPhase(null);
       
-      // Mock consolidated results
-      const mockResults = {
-        summary: {
-          totalFindings: 23,
-          critical: 3,
-          high: 8,
-          medium: 9,
-          low: 3,
-          geminiFindings: 15,
-          prowlerFindings: 18,
-          overlappingFindings: 10
-        },
-        findings: [
-          {
-            id: 1,
-            severity: 'CRITICAL',
-            title: 'Public Storage Bucket with Sensitive Data',
-            description: 'Storage bucket is publicly accessible and contains potential sensitive information.',
-            source: 'both',
-            affectedResources: ['storage-bucket-prod-data'],
-            remediation: 'Set bucket ACL to private and enable IAM-based access control.'
+      if (data.success) {
+        // Parse real scan results from the output
+        const realResults = {
+          summary: {
+            totalFindings: 0,
+            critical: 0,
+            high: 0,
+            medium: 0,
+            low: 0,
+            geminiFindings: 0,
+            prowlerFindings: 0,
+            overlappingFindings: 0
           },
-          {
-            id: 2,
-            severity: 'HIGH',
-            title: 'Database Instance Without Encryption',
-            description: 'Database instance does not have encryption at rest enabled.',
-            source: 'prowler',
-            affectedResources: ['mysql-prod-db'],
-            remediation: 'Enable encryption at rest for database instances.'
-          },
-          {
-            id: 3,
-            severity: 'HIGH',
-            title: 'Overly Permissive IAM Policies',
-            description: 'IAM policies grant excessive permissions beyond principle of least privilege.',
-            source: 'gemini',
-            affectedResources: ['service-account-app', 'role-developer'],
-            remediation: 'Review and restrict IAM policies to minimum required permissions.'
-          }
-        ],
-        executiveSummary: `Security assessment identified 23 total findings across your ${provider} infrastructure. 
-        3 CRITICAL issues require immediate attention, particularly the publicly accessible storage bucket. 
-        Recommend addressing all CRITICAL and HIGH severity findings within 7 days.`,
-        exportData
-      };
-
-      setScanResults(mockResults);
+          findings: [],
+          executiveSummary: `Security assessment completed for your ${provider} infrastructure.`,
+          exportData,
+          rawOutput: data.output,
+          outputFiles: data.scanResults?.outputFiles || {}
+        };
+        
+        // Try to parse findings from the output
+        const output = data.output || '';
+        
+        // Count findings by parsing output patterns
+        const criticalMatches = output.match(/CRITICAL/gi) || [];
+        const highMatches = output.match(/HIGH/gi) || [];
+        const mediumMatches = output.match(/MEDIUM/gi) || [];
+        const lowMatches = output.match(/LOW/gi) || [];
+        
+        realResults.summary.critical = criticalMatches.length;
+        realResults.summary.high = highMatches.length;
+        realResults.summary.medium = mediumMatches.length;
+        realResults.summary.low = lowMatches.length;
+        realResults.summary.totalFindings = realResults.summary.critical + 
+                                           realResults.summary.high + 
+                                           realResults.summary.medium + 
+                                           realResults.summary.low;
+        
+        // Extract specific findings from output if available
+        const findingMatches = output.match(/(?:CRITICAL|HIGH|MEDIUM|LOW)[^\n]+/gi) || [];
+        realResults.findings = findingMatches.slice(0, 10).map((finding, index) => ({
+          id: index + 1,
+          severity: finding.match(/(CRITICAL|HIGH|MEDIUM|LOW)/i)?.[1]?.toUpperCase() || 'UNKNOWN',
+          title: finding.replace(/(CRITICAL|HIGH|MEDIUM|LOW)/i, '').trim().slice(0, 50) + '...',
+          description: finding,
+          source: 'analysis',
+          affectedResources: ['detected-resource'],
+          remediation: 'See detailed analysis report for remediation steps.'
+        }));
+        
+        setScanResults(realResults);
+        toast({
+          title: "Security Scan Complete",
+          description: "Consolidated security report is ready for review.",
+        });
+      } else {
+        toast({
+          title: "Security Scan Failed",
+          description: "The security scan encountered errors. Check the output for details.",
+          variant: "destructive"
+        });
+      }
+    });
+    
+    ws.on('scan_error', (data) => {
+      setScanStatus('error');
+      setScanOutput(prev => prev + 'ERROR: ' + data.data + '\n');
+      
       toast({
-        title: "Security Assessment Complete",
-        description: "Consolidated security report is ready for review.",
+        title: "Scan Error",
+        description: "An error occurred during the security scan.",
+        variant: "destructive"
       });
-    }, 5000);
-  };
+    });
+    
+    return () => ws.disconnect();
+  }, [currentPhase, provider, exportData, toast]);
 
-  const startFullScan = async () => {
-    await runGeminiScan();
-    setTimeout(async () => {
-      await runProwlerScan();
-      setTimeout(async () => {
-        await runConsolidation();
-      }, 1000);
-    }, 1000);
+  const startSecurityScan = async () => {
+    try {
+      setScanStatus('running');
+      setScanProgress(0);
+      setScanOutput('');
+      setCurrentPhase('gemini');
+
+      await api.runSecurityScan({
+        exportDir: exportData.exportPath,
+        provider: provider!,
+        projectId: exportData.projectId
+      });
+    } catch (error) {
+      setScanStatus('error');
+      toast({
+        title: "Scan Failed to Start",
+        description: "Failed to start security scan. Make sure the backend server is running.",
+        variant: "destructive"
+      });
+    }
   };
 
   const handleComplete = () => {
@@ -156,12 +171,12 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
     }
   };
 
-  const getScanStatusBadge = (status: string) => {
-    switch (status) {
-      case 'running': return <Badge variant="secondary">Running...</Badge>;
-      case 'complete': return <Badge className="bg-green-100 text-green-800">Complete</Badge>;
-      case 'error': return <Badge variant="destructive">Error</Badge>;
-      default: return <Badge variant="outline">Pending</Badge>;
+  const getPhaseDescription = () => {
+    switch (currentPhase) {
+      case 'gemini': return 'Running Gemini AI security analysis...';
+      case 'prowler': return 'Running Prowler vulnerability scan...';
+      case 'consolidation': return 'Consolidating findings...';
+      default: return 'Preparing security assessment...';
     }
   };
 
@@ -180,7 +195,7 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
         <CardHeader>
           <CardTitle>Scan Configuration</CardTitle>
           <CardDescription>
-            Analyzing {exportData?.resources || 0} resources from {provider} export
+            Analyzing resources from {provider} export
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -190,150 +205,145 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
               <span className="ml-2 font-medium">{provider}</span>
             </div>
             <div>
-              <span className="text-gray-600">Resources:</span>
-              <span className="ml-2 font-medium">{exportData?.resources || 0}</span>
-            </div>
-            <div>
-              <span className="text-gray-600">Export Size:</span>
-              <span className="ml-2 font-medium">{exportData?.fileSize || 'N/A'}</span>
-            </div>
-            <div>
               <span className="text-gray-600">Export Path:</span>
-              <span className="ml-2 font-medium text-xs">{exportData?.exportPath || 'N/A'}</span>
+              <span className="ml-2 font-medium">{exportData?.exportPath || 'N/A'}</span>
             </div>
+            {exportData?.projectId && (
+              <div>
+                <span className="text-gray-600">Project ID:</span>
+                <span className="ml-2 font-medium">{exportData.projectId}</span>
+              </div>
+            )}
+            {exportData?.resourceGroup && (
+              <div>
+                <span className="text-gray-600">Resource Group:</span>
+                <span className="ml-2 font-medium">{exportData.resourceGroup}</span>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
 
-      {/* Scanning Progress */}
-      <div className="space-y-4">
-        {/* Gemini AI Scan */}
+      {/* Scan Control */}
+      {scanStatus === 'idle' && (
         <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                {getScanStatusIcon(geminiStatus)}
-                <div>
-                  <CardTitle className="text-lg">Gemini AI Security Analysis</CardTitle>
-                  <CardDescription>AI-powered vulnerability detection and analysis</CardDescription>
-                </div>
-              </div>
-              {getScanStatusBadge(geminiStatus)}
-            </div>
+          <CardHeader>
+            <CardTitle>Ready to Scan</CardTitle>
+            <CardDescription>
+              This will run Gemini AI analysis, Prowler security scan, and consolidate the results.
+            </CardDescription>
           </CardHeader>
-          {geminiStatus === 'running' && (
-            <CardContent>
-              <Progress value={geminiProgress} className="w-full" />
-              <p className="text-sm text-gray-600 mt-2">
-                Analyzing Terraform configurations with Gemini AI...
-              </p>
-            </CardContent>
-          )}
+          <CardContent>
+            <Button onClick={startSecurityScan} className="w-full bg-blue-600 hover:bg-blue-700">
+              <Search className="h-4 w-4 mr-2" />
+              Start Security Assessment
+            </Button>
+          </CardContent>
         </Card>
+      )}
 
-        {/* Prowler Scan */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                {getScanStatusIcon(prowlerStatus)}
-                <div>
-                  <CardTitle className="text-lg">Prowler Security Scan</CardTitle>
-                  <CardDescription>Industry-standard security assessment tool</CardDescription>
-                </div>
-              </div>
-              {getScanStatusBadge(prowlerStatus)}
-            </div>
-          </CardHeader>
-          {prowlerStatus === 'running' && (
-            <CardContent>
-              <Progress value={prowlerProgress} className="w-full" />
-              <p className="text-sm text-gray-600 mt-2">
-                Running Prowler security checks...
-              </p>
-            </CardContent>
-          )}
-        </Card>
-
-        {/* Consolidation */}
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-3">
-                {getScanStatusIcon(consolidationStatus)}
-                <div>
-                  <CardTitle className="text-lg">Report Consolidation</CardTitle>
-                  <CardDescription>Merging and prioritizing security findings</CardDescription>
-                </div>
-              </div>
-              {getScanStatusBadge(consolidationStatus)}
-            </div>
-          </CardHeader>
-          {consolidationStatus === 'running' && (
-            <CardContent>
-              <Progress value={consolidationProgress} className="w-full" />
-              <p className="text-sm text-gray-600 mt-2">
-                Consolidating findings and generating report...
-              </p>
-            </CardContent>
-          )}
-        </Card>
-      </div>
-
-      {/* Action Buttons */}
-      <div className="flex justify-center space-x-4">
-        {geminiStatus === 'idle' && prowlerStatus === 'idle' && (
-          <Button onClick={startFullScan} className="bg-blue-600 hover:bg-blue-700">
-            <Zap className="h-4 w-4 mr-2" />
-            Start Security Assessment
-          </Button>
-        )}
-        
-        {consolidationStatus === 'complete' && scanResults && (
-          <Button onClick={handleComplete} className="bg-green-600 hover:bg-green-700">
-            <CheckCircle className="h-4 w-4 mr-2" />
-            View Security Report
-          </Button>
-        )}
-      </div>
-
-      {/* Quick Results Preview */}
-      {consolidationStatus === 'complete' && scanResults && (
+      {/* Scan Progress */}
+      {scanStatus === 'running' && (
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center space-x-2">
-              <AlertTriangle className="h-5 w-5 text-orange-600" />
-              <span>Scan Summary</span>
+              <RefreshCw className="h-5 w-5 animate-spin" />
+              <span>Security Scan in Progress</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Alert>
-              <AlertTriangle className="h-4 w-4" />
-              <AlertDescription>
-                <strong>Assessment Complete:</strong> Found {scanResults.summary.totalFindings} total findings 
-                ({scanResults.summary.critical} Critical, {scanResults.summary.high} High severity)
-              </AlertDescription>
-            </Alert>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 text-center">
-              <div>
-                <div className="text-2xl font-bold text-red-600">{scanResults.summary.critical}</div>
-                <div className="text-sm text-gray-600">Critical</div>
+            <div className="space-y-4">
+              <Progress value={scanProgress} className="w-full" />
+              <div className="text-center">
+                <p className="text-sm text-gray-600">{getPhaseDescription()}</p>
+                <p className="text-xs text-gray-500 mt-1">{Math.round(scanProgress)}% complete</p>
               </div>
-              <div>
-                <div className="text-2xl font-bold text-orange-600">{scanResults.summary.high}</div>
-                <div className="text-sm text-gray-600">High</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-yellow-600">{scanResults.summary.medium}</div>
-                <div className="text-sm text-gray-600">Medium</div>
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-blue-600">{scanResults.summary.low}</div>
-                <div className="text-sm text-gray-600">Low</div>
+              
+              {/* Phase indicators */}
+              <div className="flex justify-center space-x-6">
+                <div className={`flex items-center space-x-2 ${currentPhase === 'gemini' ? 'text-blue-600' : currentPhase && ['prowler', 'consolidation'].includes(currentPhase) ? 'text-green-600' : 'text-gray-400'}`}>
+                  <Zap className="h-4 w-4" />
+                  <span className="text-sm">Gemini AI</span>
+                </div>
+                <div className={`flex items-center space-x-2 ${currentPhase === 'prowler' ? 'text-blue-600' : currentPhase === 'consolidation' ? 'text-green-600' : 'text-gray-400'}`}>
+                  <Shield className="h-4 w-4" />
+                  <span className="text-sm">Prowler</span>
+                </div>
+                <div className={`flex items-center space-x-2 ${currentPhase === 'consolidation' ? 'text-blue-600' : currentPhase === null ? 'text-green-600' : 'text-gray-400'}`}>
+                  <CheckCircle className="h-4 w-4" />
+                  <span className="text-sm">Consolidation</span>
+                </div>
               </div>
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Scan Output */}
+      {scanOutput && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Scan Output</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Textarea
+              value={scanOutput}
+              readOnly
+              className="h-40 font-mono text-sm bg-gray-50"
+              placeholder="Scan output will appear here..."
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Scan Results Summary */}
+      {scanStatus === 'complete' && scanResults && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2">
+              <CheckCircle className="h-5 w-5 text-green-600" />
+              <span>Security Assessment Complete</span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="text-center p-3 bg-red-50 rounded-lg">
+                  <div className="text-2xl font-bold text-red-600">{scanResults.summary.critical}</div>
+                  <div className="text-sm text-red-600">Critical</div>
+                </div>
+                <div className="text-center p-3 bg-orange-50 rounded-lg">
+                  <div className="text-2xl font-bold text-orange-600">{scanResults.summary.high}</div>
+                  <div className="text-sm text-orange-600">High</div>
+                </div>
+                <div className="text-center p-3 bg-yellow-50 rounded-lg">
+                  <div className="text-2xl font-bold text-yellow-600">{scanResults.summary.medium}</div>
+                  <div className="text-sm text-yellow-600">Medium</div>
+                </div>
+                <div className="text-center p-3 bg-blue-50 rounded-lg">
+                  <div className="text-2xl font-bold text-blue-600">{scanResults.summary.low}</div>
+                  <div className="text-sm text-blue-600">Low</div>
+                </div>
+              </div>
+              
+              <div className="pt-4 border-t">
+                <Button onClick={handleComplete} className="w-full bg-blue-600 hover:bg-blue-700">
+                  View Detailed Results
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Scan Error */}
+      {scanStatus === 'error' && (
+        <Alert variant="destructive">
+          <AlertTriangle className="h-4 w-4" />
+          <AlertDescription>
+            Security scan failed. Please check the output above for error details and try again.
+          </AlertDescription>
+        </Alert>
       )}
     </div>
   );
