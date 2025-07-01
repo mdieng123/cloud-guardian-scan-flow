@@ -240,15 +240,16 @@ app.post('/api/scan', async (req, res) => {
       echo "Starting security assessment..."
       
       # Execute security scans step by step
-      echo "--- Phase: Gemini AI Analysis ---"
-      if launch_gemini_security_scanner; then
-        echo "✓ Gemini analysis completed"
+      echo "--- Phase: Prowler Security Scan ---"
+      if launch_prowler_scan "${PROJECT_ID}"; then
+        echo "✓ Prowler scan completed"
       else
-        echo "✗ Gemini analysis failed"
+        echo "✗ Prowler scan failed"
         exit 1
       fi
       
-      echo "SCAN_RESULT:SUCCESS"
+      echo "PROWLER_COMPLETE"
+      echo "VERTEX_PROJECT_PROMPT"
     `], { 
       stdio: 'pipe',
       cwd: path.join(__dirname, '..')
@@ -277,6 +278,15 @@ app.post('/api/scan', async (req, res) => {
       // Check for success marker
       if (text.includes('SCAN_RESULT:SUCCESS')) {
         scanSuccess = true;
+      }
+      
+      // Check if we need to prompt for Vertex AI project ID
+      if (text.includes('VERTEX_PROJECT_PROMPT')) {
+        broadcast({ 
+          type: 'vertex_project_prompt', 
+          data: { message: 'Please enter GCP Project ID for Vertex AI capabilities' }
+        });
+        return; // Pause execution until we get the project ID
       }
       
       broadcast({ type: 'scan_progress', data: text });
@@ -311,6 +321,96 @@ app.post('/api/scan', async (req, res) => {
       const errorResult = {
         success: false,
         output: `Scan execution error: ${error.message}`,
+        scanResults: {},
+        exitCode: -1
+      };
+      
+      broadcast({ type: 'scan_error', data: error.message });
+      res.status(500).json(errorResult);
+    });
+    
+  } catch (error) {
+    broadcast({ type: 'scan_error', data: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Continue scan with Vertex AI project ID
+app.post('/api/continue-scan', async (req, res) => {
+  const { exportDir, provider, projectId, vertexProjectId } = req.body;
+  
+  try {
+    broadcast({ type: 'scan_phase', data: { phase: 'gemini' } });
+    
+    // Continue with Gemini analysis
+    const scriptPath = path.join(__dirname, '..', 'cloudsec.sh');
+    const bashScript = spawn('bash', ['-c', `
+      export CLOUD_PROVIDER="${provider}"
+      export PROJECT_ID="${projectId || ''}"
+      export VERTEX_PROJECT_ID="${vertexProjectId}"
+      export LAST_EXPORT_DIR="${exportDir}"
+      export LAST_EXPORT_FILE="${provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt'}"
+      export HEADLESS_MODE="true"
+      
+      # Source the original script functions
+      source "${scriptPath}"
+      
+      echo "--- Phase: Gemini AI Analysis ---"
+      if launch_gemini_security_scanner; then
+        echo "✓ Gemini analysis completed"
+      else
+        echo "✗ Gemini analysis failed"
+        exit 1
+      fi
+      
+      echo "SCAN_RESULT:SUCCESS"
+    `], { 
+      stdio: 'pipe',
+      cwd: path.join(__dirname, '..')
+    });
+    
+    let output = '';
+    let scanSuccess = false;
+    
+    bashScript.stdout.on('data', (data) => {
+      const text = data.toString();
+      output += text;
+      
+      if (text.includes('SCAN_RESULT:SUCCESS')) {
+        scanSuccess = true;
+      }
+      
+      broadcast({ type: 'scan_progress', data: text });
+    });
+    
+    bashScript.stderr.on('data', (data) => {
+      const errorText = data.toString();
+      output += errorText;
+      broadcast({ type: 'scan_error', data: errorText });
+    });
+    
+    bashScript.on('close', (code) => {
+      const result = {
+        success: scanSuccess && code === 0,
+        output,
+        scanResults: {
+          outputFiles: {
+            geminiAnalysis: scanSuccess ? 'security_analysis_*.txt' : null,
+            prowlerResults: scanSuccess ? 'prowler_scan_*_cleaned.json' : null,
+            consolidatedReport: scanSuccess ? 'consolidated_security_report_*.md' : null
+          }
+        },
+        exitCode: code
+      };
+      
+      broadcast({ type: 'scan_complete', data: result });
+      res.json(result);
+    });
+    
+    bashScript.on('error', (error) => {
+      const errorResult = {
+        success: false,
+        output: `Gemini scan execution error: ${error.message}`,
         scanResults: {},
         exitCode: -1
       };

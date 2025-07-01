@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -16,11 +18,12 @@ interface SecurityScannerProps {
 }
 
 const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider, onComplete }) => {
-  const [scanStatus, setScanStatus] = useState<'idle' | 'running' | 'complete' | 'error'>('idle');
-  const [currentPhase, setCurrentPhase] = useState<'gemini' | 'prowler' | 'consolidation' | null>(null);
+  const [scanStatus, setScanStatus] = useState<'idle' | 'running' | 'waiting_vertex_id' | 'complete' | 'error'>('idle');
+  const [currentPhase, setCurrentPhase] = useState<'prowler' | 'gemini' | 'consolidation' | null>(null);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanOutput, setScanOutput] = useState<string>('');
   const [scanResults, setScanResults] = useState<any>(null);
+  const [vertexProjectId, setVertexProjectId] = useState<string>('');
   const { toast } = useToast();
   const [ws] = useState(() => new CloudSecurityWebSocket());
 
@@ -31,7 +34,7 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
       setScanStatus('running');
       setScanProgress(0);
       setScanOutput('Starting security assessment...\n');
-      setCurrentPhase('gemini');
+      setCurrentPhase('prowler');
     });
     
     ws.on('scan_phase', (data) => {
@@ -42,9 +45,9 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
     ws.on('scan_progress', (data) => {
       setScanOutput(prev => prev + data.data);
       // Update progress based on phase
-      if (currentPhase === 'gemini') {
+      if (currentPhase === 'prowler') {
         setScanProgress(prev => Math.min(prev + Math.random() * 5, 33));
-      } else if (currentPhase === 'prowler') {
+      } else if (currentPhase === 'gemini') {
         setScanProgress(prev => Math.min(prev + Math.random() * 5, 66));
       } else if (currentPhase === 'consolidation') {
         setScanProgress(prev => Math.min(prev + Math.random() * 5, 90));
@@ -120,6 +123,17 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
       }
     });
     
+    ws.on('vertex_project_prompt', (data) => {
+      setScanStatus('waiting_vertex_id');
+      setScanProgress(40);
+      setScanOutput(prev => prev + '\n' + data.message + '\n');
+      
+      toast({
+        title: "Vertex AI Project ID Required",
+        description: "Please enter your GCP Project ID for Vertex AI capabilities.",
+      });
+    });
+    
     ws.on('scan_error', (data) => {
       setScanStatus('error');
       setScanOutput(prev => prev + 'ERROR: ' + data.data + '\n');
@@ -162,6 +176,37 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
     }
   };
 
+  const continueWithVertexAI = async () => {
+    if (!vertexProjectId.trim()) {
+      toast({
+        title: "Project ID Required",
+        description: "Please enter a valid GCP Project ID for Vertex AI.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      setScanStatus('running');
+      setCurrentPhase('gemini');
+      setScanOutput(prev => prev + `\nContinuing with Vertex AI Project ID: ${vertexProjectId}\n`);
+
+      await api.continueScan({
+        exportDir: exportData.exportPath,
+        provider: provider!,
+        projectId: exportData.projectId,
+        vertexProjectId: vertexProjectId
+      });
+    } catch (error) {
+      setScanStatus('error');
+      toast({
+        title: "Failed to Continue Scan",
+        description: "Failed to continue with Gemini analysis. Make sure the backend server is running.",
+        variant: "destructive"
+      });
+    }
+  };
+
   const getScanStatusIcon = (status: string) => {
     switch (status) {
       case 'running': return <RefreshCw className="h-5 w-5 animate-spin" />;
@@ -173,8 +218,8 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
 
   const getPhaseDescription = () => {
     switch (currentPhase) {
-      case 'gemini': return 'Running Gemini AI security analysis...';
       case 'prowler': return 'Running Prowler vulnerability scan...';
+      case 'gemini': return 'Running Gemini AI security analysis...';
       case 'consolidation': return 'Consolidating findings...';
       default: return 'Preparing security assessment...';
     }
@@ -230,7 +275,7 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
           <CardHeader>
             <CardTitle>Ready to Scan</CardTitle>
             <CardDescription>
-              This will run Gemini AI analysis, Prowler security scan, and consolidate the results.
+              This will run Prowler security scan first, then Gemini AI analysis, and consolidate the results.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -238,6 +283,42 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
               <Search className="h-4 w-4 mr-2" />
               Start Security Assessment
             </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Vertex AI Project ID Input */}
+      {scanStatus === 'waiting_vertex_id' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Vertex AI Configuration Required</CardTitle>
+            <CardDescription>
+              Prowler scan completed! Now we need your GCP Project ID for Vertex AI to run Gemini analysis.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="vertexProjectId">GCP Project ID for Vertex AI</Label>
+                <Input
+                  id="vertexProjectId"
+                  placeholder="your-vertex-ai-project"
+                  value={vertexProjectId}
+                  onChange={(e) => setVertexProjectId(e.target.value)}
+                />
+                <p className="text-xs text-gray-500">
+                  This project will be used for Vertex AI Gemini analysis
+                </p>
+              </div>
+              <Button 
+                onClick={continueWithVertexAI}
+                disabled={!vertexProjectId.trim()}
+                className="w-full bg-blue-600 hover:bg-blue-700"
+              >
+                <Zap className="h-4 w-4 mr-2" />
+                Continue with Gemini Analysis
+              </Button>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -261,13 +342,13 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
               
               {/* Phase indicators */}
               <div className="flex justify-center space-x-6">
-                <div className={`flex items-center space-x-2 ${currentPhase === 'gemini' ? 'text-blue-600' : currentPhase && ['prowler', 'consolidation'].includes(currentPhase) ? 'text-green-600' : 'text-gray-400'}`}>
-                  <Zap className="h-4 w-4" />
-                  <span className="text-sm">Gemini AI</span>
-                </div>
-                <div className={`flex items-center space-x-2 ${currentPhase === 'prowler' ? 'text-blue-600' : currentPhase === 'consolidation' ? 'text-green-600' : 'text-gray-400'}`}>
+                <div className={`flex items-center space-x-2 ${currentPhase === 'prowler' ? 'text-blue-600' : currentPhase && ['gemini', 'consolidation'].includes(currentPhase) ? 'text-green-600' : 'text-gray-400'}`}>
                   <Shield className="h-4 w-4" />
                   <span className="text-sm">Prowler</span>
+                </div>
+                <div className={`flex items-center space-x-2 ${currentPhase === 'gemini' ? 'text-blue-600' : currentPhase === 'consolidation' ? 'text-green-600' : 'text-gray-400'}`}>
+                  <Zap className="h-4 w-4" />
+                  <span className="text-sm">Gemini AI</span>
                 </div>
                 <div className={`flex items-center space-x-2 ${currentPhase === 'consolidation' ? 'text-blue-600' : currentPhase === null ? 'text-green-600' : 'text-gray-400'}`}>
                   <CheckCircle className="h-4 w-4" />

@@ -767,13 +767,24 @@ function launch_gemini_security_scanner() {
   
    # Get GCP Project ID for Vertex AI
    local vertex_project_id=""
-   echo -e "${YELLOW}Enter GCP Project ID for Vertex AI capabilities:${NC}"
-   read -p "Project ID: " vertex_project_id
-  
-   # Validate project ID
-   if [[ -z "$vertex_project_id" ]]; then
-       echo -e "${RED}✗ Project ID is required for Vertex AI${NC}"
-       return 1
+   
+   # In headless mode, use environment variable
+   if [[ "$HEADLESS_MODE" == "true" ]]; then
+       vertex_project_id="${VERTEX_PROJECT_ID:-$PROJECT_ID}"
+       if [[ -z "$vertex_project_id" ]]; then
+           echo -e "${RED}✗ VERTEX_PROJECT_ID environment variable not set for headless mode${NC}"
+           return 1
+       fi
+       echo -e "${GREEN}Using Vertex AI Project ID from environment: ${vertex_project_id}${NC}"
+   else
+       echo -e "${YELLOW}Enter GCP Project ID for Vertex AI capabilities:${NC}"
+       read -p "Project ID: " vertex_project_id
+      
+       # Validate project ID
+       if [[ -z "$vertex_project_id" ]]; then
+           echo -e "${RED}✗ Project ID is required for Vertex AI${NC}"
+           return 1
+       fi
    fi
   
    echo -e "${GREEN}✓ Using Project: ${vertex_project_id}${NC}"

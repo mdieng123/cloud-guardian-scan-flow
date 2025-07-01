@@ -61,6 +61,15 @@ export const api = {
     return response.json();
   },
 
+  async continueScan(request: ScanRequest & { vertexProjectId: string }): Promise<ScanResult> {
+    const response = await fetch(`${API_BASE}/continue-scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request)
+    });
+    return response.json();
+  },
+
   async healthCheck() {
     const response = await fetch(`${API_BASE}/health`);
     return response.json();
