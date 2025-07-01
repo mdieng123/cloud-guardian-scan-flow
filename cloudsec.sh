@@ -1088,11 +1088,17 @@ function check_requirements() {
        done
        echo ""
        echo "Some features may not work without these tools."
-       read -p "Continue anyway? (Y/N): " continue_anyway
-       # Convert to uppercase in a portable way
-       continue_anyway=$(echo "$continue_anyway" | tr '[:lower:]' '[:upper:]')
-       if [[ "$continue_anyway" != "Y" ]]; then
-           exit 1
+       
+       # In headless mode, continue automatically if we have required tools for the provider
+       if [[ "$HEADLESS_MODE" == "true" ]]; then
+           echo -e "${GREEN}Continuing in headless mode...${NC}"
+       else
+           read -p "Continue anyway? (Y/N): " continue_anyway
+           # Convert to uppercase in a portable way
+           continue_anyway=$(echo "$continue_anyway" | tr '[:lower:]' '[:upper:]')
+           if [[ "$continue_anyway" != "Y" ]]; then
+               exit 1
+           fi
        fi
    fi
 }

@@ -91,7 +91,12 @@ export class CloudSecurityWebSocket {
 
         const handler = this.handlers.get(message.type);
         if (handler) {
-          handler(message.data || message);
+          // For progress messages, pass the whole message to preserve structure
+          if (message.type === 'export_progress' || message.type === 'scan_progress') {
+            handler(message);
+          } else {
+            handler(message.data || message);
+          }
         }
       } catch (error) {
         console.error('WebSocket message parsing error:', error);

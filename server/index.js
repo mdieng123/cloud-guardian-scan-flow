@@ -114,21 +114,32 @@ app.post('/api/export', async (req, res) => {
   const { provider, projectId, resourceGroup } = req.body;
   
   try {
-    broadcast({ type: 'export_start', data: { provider } });
+    broadcast({ type: 'export_start', data: { provider }, provider });
     
     const scriptPath = path.join(__dirname, '..', 'cloudsec.sh');
     
     const bashScript = spawn('bash', [scriptPath], { 
-      stdio: 'pipe',
+      stdio: ['pipe', 'pipe', 'pipe'],
       cwd: path.join(__dirname, '..'),
       env: {
         ...process.env,
         CLOUD_PROVIDER: provider,
         PROJECT_ID: projectId || '',
         RESOURCE_GROUP: resourceGroup || '',
-        HEADLESS_MODE: 'true'
+        HEADLESS_MODE: 'true',
+        PATH: process.env.PATH
       }
     });
+    
+    console.log('Started bash script with env:', {
+      CLOUD_PROVIDER: provider,
+      PROJECT_ID: projectId || '',
+      RESOURCE_GROUP: resourceGroup || '',
+      HEADLESS_MODE: 'true'
+    });
+    
+    // Send immediate feedback
+    broadcast({ type: 'export_progress', data: `Initializing ${provider} export...\n` });
     
     let output = '';
     let exportSuccess = false;
@@ -138,6 +149,8 @@ app.post('/api/export', async (req, res) => {
     bashScript.stdout.on('data', (data) => {
       const text = data.toString();
       output += text;
+      
+      console.log('Script output:', text); // Debug logging
       
       // Parse for the structured output we added
       if (text.includes('EXPORT_RESULT:')) {

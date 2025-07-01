@@ -34,11 +34,12 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
       setIsExporting(true);
       setExportStatus('running');
       setExportProgress(0);
-      setExportOutput('Starting export for ' + data.provider + '...\n');
+      setExportOutput('Starting export for ' + (data?.provider || provider) + '...\n');
     });
     
     ws.on('export_progress', (data) => {
-      setExportOutput(prev => prev + data.data);
+      const text = data?.data || data || '';
+      setExportOutput(prev => prev + text);
       // Simulate progress based on output
       setExportProgress(prev => Math.min(prev + Math.random() * 10, 90));
     });
@@ -80,7 +81,8 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
     ws.on('export_error', (data) => {
       setIsExporting(false);
       setExportStatus('error');
-      setExportOutput(prev => prev + 'ERROR: ' + data.data + '\n');
+      const errorText = data?.data || data || 'Unknown error';
+      setExportOutput(prev => prev + 'ERROR: ' + errorText + '\n');
       
       toast({
         title: "Export Error",
