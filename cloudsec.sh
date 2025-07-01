@@ -438,6 +438,53 @@ function export_azure_resources() {
 
 
 #######################################
+# Function: Launch Prowler Scan Only (without consolidation)
+# Globals: None
+# Arguments: Project ID
+# Outputs: Prowler scan results
+# Returns: 0 if successful, 1 if failed
+#######################################
+function launch_prowler_scan_only() {
+    local project_id=$1
+    
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}Launching Prowler Security Scan${NC}"
+    echo -e "${GREEN}========================================${NC}"
+    echo ""
+    
+    # Check if prowler is installed
+    if ! command -v prowler &> /dev/null; then
+        echo -e "${RED}✗ Prowler is not installed!${NC}"
+        echo "Please install prowler first:"
+        echo "  pip install prowler"
+        echo "  Or visit: https://github.com/prowler-cloud/prowler"
+        return 1
+    fi
+    
+    echo -e "${YELLOW}Running Prowler scan for project: ${project_id}${NC}"
+    echo "This may take several minutes..."
+    echo ""
+    
+    # Create output filename with timestamp
+    local prowler_output="prowler_scan_$(date +%Y%m%d_%H%M%S)"
+    
+    # Run prowler scan
+    echo -e "${YELLOW}Executing: prowler gcp --project-ids ${project_id} --output-modes json-ocsf${NC}"
+    
+    prowler gcp --project-ids "$project_id" --output-modes json-ocsf --output-filename "$prowler_output"
+    echo -e "${GREEN}✓ Prowler scan completed successfully!${NC}"
+    echo -e "Raw output saved to: ${BLUE}${prowler_output}${NC}"
+    echo ""
+        
+    # Clean the JSON output
+    clean_prowler_json "output/$prowler_output.ocsf.json"
+    
+    # Don't try consolidation - just return success
+    return 0
+}
+
+#######################################
 # Function: Launch Prowler Scan
 # Globals: None
 # Arguments: Project ID

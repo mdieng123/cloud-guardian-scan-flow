@@ -243,7 +243,7 @@ app.post('/api/scan', async (req, res) => {
       
       # Execute security scans step by step  
       echo "--- Phase: Prowler Security Scan ---"
-      if launch_prowler_scan "\${PROJECT_ID}"; then
+      if launch_prowler_scan_only "\${PROJECT_ID}"; then
         echo "✓ Prowler scan completed"
         echo "PROWLER_COMPLETE"
         echo "VERTEX_PROJECT_PROMPT"
@@ -363,6 +363,24 @@ app.post('/api/continue-scan', async (req, res) => {
       echo "--- Phase: Gemini AI Analysis ---"
       if launch_gemini_security_scanner; then
         echo "✓ Gemini analysis completed"
+        
+        echo "--- Phase: Consolidation Analysis ---"
+        # Find the latest prowler cleaned file
+        PROWLER_CLEANED_FILE=\$(ls -t output/prowler_scan_*_cleaned.json 2>/dev/null | head -1)
+        
+        # Try consolidation if both files exist
+        if [[ -n "\$GEMINI_ANALYSIS_FILE" ]] && [[ -n "\$PROWLER_CLEANED_FILE" ]]; then
+          echo "Starting consolidation analysis..."
+          echo "Using Gemini file: \$GEMINI_ANALYSIS_FILE"
+          echo "Using Prowler file: \$PROWLER_CLEANED_FILE"
+          launch_consolidation_analysis
+          echo "✓ Consolidation completed"
+        else
+          echo "⚠ Skipping consolidation - missing file paths"
+          echo "Gemini file: \${GEMINI_ANALYSIS_FILE:-'Not found'}"
+          echo "Prowler file: \${PROWLER_CLEANED_FILE:-'Not found'}"
+        fi
+        
       else
         echo "✗ Gemini analysis failed"
         exit 1
