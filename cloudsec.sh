@@ -470,18 +470,30 @@ function launch_prowler_scan_only() {
     local prowler_output="prowler_scan_$(date +%Y%m%d_%H%M%S)"
     
     # Run prowler scan
-    echo -e "${YELLOW}Executing: prowler gcp --project-ids ${project_id} --output-modes json-ocsf${NC}"
+    echo -e "${YELLOW}Executing: prowler gcp --project-ids ${project_id} --output-formats json-ocsf --output-filename ${prowler_output} --output-directory output${NC}"
     
-    prowler gcp --project-ids "$project_id" --output-modes json-ocsf --output-filename "$prowler_output"
-    echo -e "${GREEN}✓ Prowler scan completed successfully!${NC}"
-    echo -e "Raw output saved to: ${BLUE}${prowler_output}${NC}"
-    echo ""
+    # Run prowler and capture exit code
+    prowler gcp --project-ids "$project_id" --output-formats json-ocsf --output-filename "$prowler_output" --output-directory output
+    local prowler_exit_code=$?
+    
+    # Prowler exit codes: 0 = success, 3 = success but found issues, others = failure
+    if [[ $prowler_exit_code -eq 0 ]] || [[ $prowler_exit_code -eq 3 ]]; then
+        echo -e "${GREEN}✓ Prowler scan completed successfully!${NC}"
+        echo -e "Raw output saved to: ${BLUE}${prowler_output}${NC}"
+        echo ""
         
-    # Clean the JSON output
-    clean_prowler_json "output/$prowler_output.ocsf.json"
-    
-    # Don't try consolidation - just return success
-    return 0
+        # Clean the JSON output
+        if clean_prowler_json "output/$prowler_output.ocsf.json"; then
+            echo -e "${GREEN}✓ Prowler JSON cleaned successfully${NC}"
+            return 0
+        else
+            echo -e "${RED}✗ Failed to clean Prowler JSON output${NC}"
+            return 1
+        fi
+    else
+        echo -e "${RED}✗ Prowler scan failed!${NC}"
+        return 1
+    fi
 }
 
 #######################################
@@ -517,9 +529,9 @@ function launch_prowler_scan() {
     local prowler_output="prowler_scan_$(date +%Y%m%d_%H%M%S)"
     
     # Run prowler scan
-    echo -e "${YELLOW}Executing: prowler gcp --project-ids ${project_id} --output-modes json-ocsf${NC}"
+    echo -e "${YELLOW}Executing: prowler gcp --project-ids ${project_id} --output-formats json-ocsf --output-filename ${prowler_output} --output-directory output${NC}"
     
-    prowler gcp --project-ids "$project_id" --output-modes json-ocsf --output-filename "$prowler_output"
+    prowler gcp --project-ids "$project_id" --output-formats json-ocsf --output-filename "$prowler_output" --output-directory output
     echo -e "${GREEN}✓ Prowler scan completed successfully!${NC}"
     echo -e "Raw output saved to: ${BLUE}${prowler_output}${NC}"
     echo ""
@@ -836,6 +848,8 @@ function launch_gemini_security_scanner() {
   
    echo -e "${GREEN}✓ Using Project: ${vertex_project_id}${NC}"
    echo -e "${GREEN}✓ Terraform Export: ${LAST_EXPORT_DIR}${NC}"
+   echo -e "${YELLOW}DEBUG: LAST_EXPORT_DIR value: '${LAST_EXPORT_DIR}'${NC}"
+   echo -e "${YELLOW}DEBUG: Current working directory: $(pwd)${NC}"
    echo ""
   
    # Check Python3 is installed
@@ -991,6 +1005,10 @@ EOF
        GEMINI_ANALYSIS_FILE=$(ls -t security_analysis_*.txt 2>/dev/null | head -1)
        if [[ -n "$GEMINI_ANALYSIS_FILE" ]]; then
            echo -e "${GREEN}Gemini analysis saved to: ${GEMINI_ANALYSIS_FILE}${NC}"
+           # Export the variable so it's available to other functions
+           export GEMINI_ANALYSIS_FILE
+       else
+           echo -e "${YELLOW}⚠ Warning: Could not find Gemini analysis output file${NC}"
        fi
        echo ""
        
@@ -998,6 +1016,8 @@ EOF
        if [[ "$SKIP_PROWLER" != "true" ]]; then
            launch_prowler_scan "$PROJECT_ID"
        fi
+       
+       return 0
    else
        echo -e "${RED}✗ Gemini Security scan failed. Check error messages above.${NC}"
        return 1

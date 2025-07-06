@@ -236,21 +236,52 @@ app.post('/api/scan', async (req, res) => {
       export LAST_EXPORT_FILE="${provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt'}"
       export HEADLESS_MODE="true"
       
-      # Source the original script functions
-      source "${scriptPath}"
-      
       echo "Starting security assessment..."
-      
-      # Execute security scans step by step  
       echo "--- Phase: Prowler Security Scan ---"
-      if launch_prowler_scan_only "\${PROJECT_ID}"; then
-        echo "✓ Prowler scan completed"
+      
+      # Check if we already have prowler results
+      EXISTING_PROWLER=\$(ls -t output/prowler_scan_*_cleaned.json 2>/dev/null | head -1)
+      if [[ -n "\$EXISTING_PROWLER" ]]; then
+        echo "Found existing Prowler scan results: \$EXISTING_PROWLER"
+        echo "✓ Using existing Prowler scan"
         echo "PROWLER_COMPLETE"
         echo "VERTEX_PROJECT_PROMPT"
         exit 0
       else
-        echo "✗ Prowler scan failed"
-        exit 1
+        echo "No existing prowler results found, starting fresh scan"
+        
+        # Source the original script functions only if needed
+        source "${scriptPath}"
+        
+        echo "Launching prowler scan with wrapper script approach..."
+        
+        # Create a temporary wrapper script for timeout
+        cat > temp_prowler_wrapper.sh << WRAPPER_EOF
+#!/bin/bash
+export CLOUD_PROVIDER="${provider}"
+export PROJECT_ID="${projectId || ''}"
+export LAST_EXPORT_DIR="${exportDir}"
+export LAST_EXPORT_FILE="${provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt'}"
+export HEADLESS_MODE="true"
+echo "DEBUG: Wrapper script received project ID: '\$1'"
+echo "DEBUG: Environment PROJECT_ID: '\$PROJECT_ID'"
+source "${scriptPath}"
+launch_prowler_scan_only "\$PROJECT_ID"
+WRAPPER_EOF
+        chmod +x temp_prowler_wrapper.sh
+        
+        # Try to run prowler scan with timeout using wrapper
+        if timeout 600 ./temp_prowler_wrapper.sh "${projectId || ''}"; then
+          rm -f temp_prowler_wrapper.sh
+          echo "✓ Prowler scan completed successfully"
+          echo "PROWLER_COMPLETE"
+          echo "VERTEX_PROJECT_PROMPT"
+          exit 0
+        else
+          rm -f temp_prowler_wrapper.sh
+          echo "✗ Prowler scan failed with exit code: \$?"
+          exit 1
+        fi
       fi
     `], { 
       stdio: 'pipe',
@@ -267,13 +298,10 @@ app.post('/api/scan', async (req, res) => {
       
       // Parse for different scan phases
       if (text.includes('--- Phase: Gemini AI Analysis ---')) {
-        currentPhase = 'gemini';
         broadcast({ type: 'scan_phase', data: { phase: 'gemini' } });
       } else if (text.includes('Prowler Security Scan')) {
-        currentPhase = 'prowler';
         broadcast({ type: 'scan_phase', data: { phase: 'prowler' } });
       } else if (text.includes('Consolidation Analysis')) {
-        currentPhase = 'consolidation';
         broadcast({ type: 'scan_phase', data: { phase: 'consolidation' } });
       }
       
@@ -357,33 +385,45 @@ app.post('/api/continue-scan', async (req, res) => {
     
     // Continue with Gemini analysis
     const scriptPath = path.join(__dirname, '..', 'cloudsec.sh');
+    const fullExportDir = exportDir.startsWith('/') ? exportDir : path.join(__dirname, '..', exportDir);
     const bashScript = spawn('bash', ['-c', `
       export CLOUD_PROVIDER="${provider}"
       export PROJECT_ID="${projectId || ''}"
       export VERTEX_PROJECT_ID="${vertexProjectId}"
-      export LAST_EXPORT_DIR="${exportDir}"
+      export LAST_EXPORT_DIR="${fullExportDir}"
       export LAST_EXPORT_FILE="${provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt'}"
       export HEADLESS_MODE="true"
       export SKIP_PROWLER="true"
+      
+      echo "DEBUG SERVER: LAST_EXPORT_DIR before sourcing: '${fullExportDir}'"
+      echo "DEBUG SERVER: About to source script: ${scriptPath}"
       
       # Source the original script functions
       source "${scriptPath}"
       
       echo "--- Phase: Gemini AI Analysis ---"
-      if launch_gemini_security_scanner; then
+      if LAST_EXPORT_DIR="${fullExportDir}" launch_gemini_security_scanner; then
         echo "✓ Gemini analysis completed"
         
         echo "--- Phase: Consolidation Analysis ---"
         # Find the latest prowler cleaned file
         PROWLER_CLEANED_FILE=\$(ls -t output/prowler_scan_*_cleaned.json 2>/dev/null | head -1)
         
+        # Find the latest gemini analysis file (in case GEMINI_ANALYSIS_FILE wasn't exported)
+        if [[ -z "\$GEMINI_ANALYSIS_FILE" ]]; then
+          GEMINI_ANALYSIS_FILE=\$(ls -t security_analysis_*.txt 2>/dev/null | head -1)
+        fi
+        
         # Try consolidation if both files exist
         if [[ -n "\$GEMINI_ANALYSIS_FILE" ]] && [[ -n "\$PROWLER_CLEANED_FILE" ]]; then
           echo "Starting consolidation analysis..."
           echo "Using Gemini file: \$GEMINI_ANALYSIS_FILE"
           echo "Using Prowler file: \$PROWLER_CLEANED_FILE"
-          launch_consolidation_analysis
-          echo "✓ Consolidation completed"
+          if launch_consolidation_analysis; then
+            echo "✓ Consolidation completed"
+          else
+            echo "⚠ Consolidation failed, but continuing"
+          fi
         else
           echo "⚠ Skipping consolidation - missing file paths"
           echo "Gemini file: \${GEMINI_ANALYSIS_FILE:-'Not found'}"
@@ -458,7 +498,7 @@ app.post('/api/continue-scan', async (req, res) => {
 });
 
 // Health check endpoint
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (_, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
