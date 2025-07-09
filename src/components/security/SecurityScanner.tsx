@@ -18,12 +18,15 @@ interface SecurityScannerProps {
 }
 
 const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider, onComplete }) => {
+  // Debug: Log the exportData to see what we're getting
+  console.log('SecurityScanner - exportData:', exportData);
+  console.log('SecurityScanner - provider:', provider);
   const [scanStatus, setScanStatus] = useState<'idle' | 'running' | 'waiting_vertex_id' | 'complete' | 'error'>('idle');
   const [currentPhase, setCurrentPhase] = useState<'prowler' | 'gemini' | 'consolidation' | null>(null);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanOutput, setScanOutput] = useState<string>('');
   const [scanResults, setScanResults] = useState<any>(null);
-  const [vertexProjectId, setVertexProjectId] = useState<string>('');
+  const [geminiApiKey, setGeminiApiKey] = useState<string>('');
   const { toast } = useToast();
   const [ws] = useState(() => new CloudSecurityWebSocket());
 
@@ -130,8 +133,8 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
       setScanOutput(prev => prev + '\n✅ Prowler scan completed successfully!\n' + data.message + '\n');
       
       toast({
-        title: "Prowler Complete - Vertex AI Required",
-        description: "Prowler found security issues. Please enter your GCP Project ID for Vertex AI analysis.",
+        title: "Prowler Complete - Gemini API Required",
+        description: "Prowler found security issues. Please enter your Gemini API key for AI analysis.",
       });
     });
     
@@ -157,10 +160,25 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
       setScanOutput('');
       setCurrentPhase('gemini');
 
+      // Use exportData.projectId, or show error if missing
+      const projectIdToUse = exportData.projectId;
+      
+      if (!projectIdToUse && provider === 'GCP') {
+        setScanStatus('error');
+        toast({
+          title: "Missing Project ID",
+          description: "No project ID found in export data. Please re-run the export step.",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      console.log('Starting scan with projectId:', projectIdToUse);
+      
       await api.runSecurityScan({
         exportDir: exportData.exportPath,
         provider: provider!,
-        projectId: exportData.projectId
+        projectId: projectIdToUse
       });
     } catch (error) {
       setScanStatus('error');
@@ -178,11 +196,11 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
     }
   };
 
-  const continueWithVertexAI = async () => {
-    if (!vertexProjectId.trim()) {
+  const continueWithGeminiAPI = async () => {
+    if (!geminiApiKey.trim()) {
       toast({
-        title: "Project ID Required",
-        description: "Please enter a valid GCP Project ID for Vertex AI.",
+        title: "API Key Required",
+        description: "Please enter a valid Gemini API key.",
         variant: "destructive"
       });
       return;
@@ -191,19 +209,65 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
     try {
       setScanStatus('running');
       setCurrentPhase('gemini');
-      setScanOutput(prev => prev + `\nContinuing with Vertex AI Project ID: ${vertexProjectId}\n`);
+      setScanOutput(prev => prev + `\nContinuing with Gemini API...\n`);
 
+      // Use exportData.projectId, or show error if missing
+      const projectIdToUse = exportData.projectId;
+      
+      if (!projectIdToUse && provider === 'GCP') {
+        setScanStatus('error');
+        toast({
+          title: "Missing Project ID",
+          description: "No project ID found in export data. Please re-run the export step.",
+          variant: "destructive"
+        });
+        return;
+      }
+      
       await api.continueScan({
         exportDir: exportData.exportPath,
         provider: provider!,
-        projectId: exportData.projectId,
-        vertexProjectId: vertexProjectId
+        projectId: projectIdToUse,
+        geminiApiKey: geminiApiKey
       });
     } catch (error) {
       setScanStatus('error');
       toast({
         title: "Failed to Continue Scan",
         description: "Failed to continue with Gemini analysis. Make sure the backend server is running.",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const rerunSecurityScan = async () => {
+    try {
+      setScanStatus('running');
+      setScanProgress(50); // Skip Prowler, go straight to Gemini
+      setScanOutput('Re-running security scan with existing export data...\n');
+      setCurrentPhase('gemini');
+      setScanResults(null);
+
+      // Use the stored Gemini API key if available, otherwise prompt for it
+      if (geminiApiKey.trim()) {
+        const projectIdToUse = exportData.projectId || (provider === 'GCP' ? 'inbound-entity-461511-j4' : undefined);
+        
+        await api.continueScan({
+          exportDir: exportData.exportPath,
+          provider: provider!,
+          projectId: projectIdToUse,
+          geminiApiKey: geminiApiKey
+        });
+      } else {
+        // Need to get Gemini API key first
+        setScanStatus('waiting_vertex_id');
+        setScanOutput(prev => prev + '\nGemini API key required for AI analysis...\n');
+      }
+    } catch (error) {
+      setScanStatus('error');
+      toast({
+        title: "Scan Failed to Start",
+        description: "Failed to restart security scan. Make sure the backend server is running.",
         variant: "destructive"
       });
     }
@@ -281,40 +345,54 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={startSecurityScan} className="w-full bg-blue-600 hover:bg-blue-700">
-              <Search className="h-4 w-4 mr-2" />
-              Start Security Assessment
-            </Button>
+            <div className="space-y-3">
+              <Button onClick={startSecurityScan} className="w-full bg-blue-600 hover:bg-blue-700">
+                <Search className="h-4 w-4 mr-2" />
+                Start Full Security Assessment
+              </Button>
+              <Button 
+                onClick={rerunSecurityScan} 
+                variant="outline" 
+                className="w-full border-blue-600 text-blue-600 hover:bg-blue-50"
+              >
+                <Zap className="h-4 w-4 mr-2" />
+                Run Security Analysis Only
+              </Button>
+              <p className="text-xs text-gray-500 text-center">
+                "Security Analysis Only" skips Prowler and runs Gemini AI analysis on existing export data
+              </p>
+            </div>
           </CardContent>
         </Card>
       )}
 
-      {/* Vertex AI Project ID Input */}
+      {/* Gemini API Key Input */}
       {scanStatus === 'waiting_vertex_id' && (
         <Card>
           <CardHeader>
-            <CardTitle>Vertex AI Configuration Required</CardTitle>
+            <CardTitle>Gemini API Key Required</CardTitle>
             <CardDescription>
-              Prowler scan completed! Now we need your GCP Project ID for Vertex AI to run Gemini analysis.
+              Prowler scan completed! Now we need your Gemini API key to run AI security analysis.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="vertexProjectId">GCP Project ID for Vertex AI</Label>
+                <Label htmlFor="geminiApiKey">Gemini API Key</Label>
                 <Input
-                  id="vertexProjectId"
-                  placeholder="your-vertex-ai-project"
-                  value={vertexProjectId}
-                  onChange={(e) => setVertexProjectId(e.target.value)}
+                  id="geminiApiKey"
+                  type="password"
+                  placeholder="AIza..."
+                  value={geminiApiKey}
+                  onChange={(e) => setGeminiApiKey(e.target.value)}
                 />
                 <p className="text-xs text-gray-500">
-                  This project will be used for Vertex AI Gemini analysis
+                  Get your free API key from <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Google AI Studio</a>
                 </p>
               </div>
               <Button 
-                onClick={continueWithVertexAI}
-                disabled={!vertexProjectId.trim()}
+                onClick={continueWithGeminiAPI}
+                disabled={!geminiApiKey.trim()}
                 className="w-full bg-blue-600 hover:bg-blue-700"
               >
                 <Zap className="h-4 w-4 mr-2" />
@@ -409,9 +487,17 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
                 </div>
               </div>
               
-              <div className="pt-4 border-t">
+              <div className="pt-4 border-t space-y-3">
                 <Button onClick={handleComplete} className="w-full bg-blue-600 hover:bg-blue-700">
                   View Detailed Results
+                </Button>
+                <Button 
+                  onClick={rerunSecurityScan} 
+                  variant="outline" 
+                  className="w-full border-blue-600 text-blue-600 hover:bg-blue-50"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Re-run Security Scan
                 </Button>
               </div>
             </div>
@@ -421,12 +507,25 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
 
       {/* Scan Error */}
       {scanStatus === 'error' && (
-        <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>
-            Security scan failed. Please check the output above for error details and try again.
-          </AlertDescription>
-        </Alert>
+        <div className="space-y-4">
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertDescription>
+              Security scan failed. Please check the output above for error details and try again.
+            </AlertDescription>
+          </Alert>
+          <Card>
+            <CardContent className="pt-6">
+              <Button 
+                onClick={rerunSecurityScan} 
+                className="w-full bg-blue-600 hover:bg-blue-700"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Re-run Security Scan
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );

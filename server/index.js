@@ -5,6 +5,7 @@ import { spawn } from 'child_process';
 import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -222,7 +223,41 @@ app.post('/api/export', async (req, res) => {
 
 // Security scan endpoint
 app.post('/api/scan', async (req, res) => {
-  const { exportDir, provider, projectId } = req.body;
+  let { exportDir, provider, projectId } = req.body;
+  
+  console.log('DEBUG: Scan request received:', { exportDir, provider, projectId });
+  
+  // If projectId is missing for GCP, try to get it from gcloud config or export metadata
+  if (provider === 'GCP' && !projectId) {
+    try {
+      // First try to read from export metadata
+      const metadataPath = path.join(exportDir, 'export_metadata.txt');
+      if (fs.existsSync(metadataPath)) {
+        const metadata = fs.readFileSync(metadataPath, 'utf-8');
+        const match = metadata.match(/Project ID:\s*([a-zA-Z0-9-]+)/);
+        if (match) {
+          projectId = match[1];
+          console.log('DEBUG: Extracted project ID from metadata:', projectId);
+        }
+      }
+      
+      // If still no project ID, try gcloud config
+      if (!projectId) {
+        const result = spawn('gcloud', ['config', 'get-value', 'project'], { stdio: 'pipe' });
+        const output = await new Promise((resolve) => {
+          let data = '';
+          result.stdout.on('data', (chunk) => data += chunk);
+          result.on('close', () => resolve(data.trim()));
+        });
+        if (output && output !== '(unset)') {
+          projectId = output;
+          console.log('DEBUG: Got project ID from gcloud config:', projectId);
+        }
+      }
+    } catch (error) {
+      console.log('DEBUG: Could not auto-detect project ID:', error.message);
+    }
+  }
   
   try {
     broadcast({ type: 'scan_start' });
@@ -378,7 +413,7 @@ WRAPPER_EOF
 
 // Continue scan with Vertex AI project ID
 app.post('/api/continue-scan', async (req, res) => {
-  const { exportDir, provider, projectId, vertexProjectId } = req.body;
+  const { exportDir, provider, projectId, vertexProjectId, geminiApiKey } = req.body;
   
   try {
     broadcast({ type: 'scan_phase', data: { phase: 'gemini' } });
@@ -390,6 +425,7 @@ app.post('/api/continue-scan', async (req, res) => {
       export CLOUD_PROVIDER="${provider}"
       export PROJECT_ID="${projectId || ''}"
       export VERTEX_PROJECT_ID="${vertexProjectId}"
+      export GOOGLE_API_KEY="${geminiApiKey}"
       export LAST_EXPORT_DIR="${fullExportDir}"
       export LAST_EXPORT_FILE="${provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt'}"
       export HEADLESS_MODE="true"
@@ -408,6 +444,14 @@ app.post('/api/continue-scan', async (req, res) => {
         echo "--- Phase: Consolidation Analysis ---"
         # Find the latest prowler cleaned file
         PROWLER_CLEANED_FILE=\$(ls -t output/prowler_scan_*_cleaned.json 2>/dev/null | head -1)
+        
+        # Copy Prowler file to root directory for consolidation access
+        if [[ -n "\$PROWLER_CLEANED_FILE" ]]; then
+          PROWLER_FILENAME=\$(basename "\$PROWLER_CLEANED_FILE")
+          cp "\$PROWLER_CLEANED_FILE" "./\$PROWLER_FILENAME"
+          PROWLER_CLEANED_FILE="./\$PROWLER_FILENAME"
+          echo "Copied Prowler file to root directory: \$PROWLER_CLEANED_FILE"
+        fi
         
         # Find the latest gemini analysis file (in case GEMINI_ANALYSIS_FILE wasn't exported)
         if [[ -z "\$GEMINI_ANALYSIS_FILE" ]]; then

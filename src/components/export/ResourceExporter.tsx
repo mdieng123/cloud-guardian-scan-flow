@@ -9,6 +9,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { FileText, Download, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { api, CloudSecurityWebSocket } from '@/lib/api';
+
+// Helper function to extract project ID from export output
+const extractProjectIdFromOutput = (output: string): string | undefined => {
+  // Look for "Project ID: xxx" in the output
+  const match = output.match(/Project ID:\s*([a-zA-Z0-9-]+)/);
+  return match ? match[1] : undefined;
+};
 import type { CloudProvider } from '@/pages/Index';
 
 interface ResourceExporterProps {
@@ -50,9 +57,15 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
       
       if (data.success) {
         setExportStatus('success');
+        
+        // Extract project ID from the actual export results, not just state
+        const actualProjectId = provider === 'GCP' 
+          ? (projectId || extractProjectIdFromOutput(data.output))
+          : undefined;
+        
         setExportResults({
           provider,
-          projectId: provider === 'GCP' ? projectId : undefined,
+          projectId: actualProjectId,
           resourceGroup: provider === 'AZURE' ? resourceGroup : undefined,
           exportPath: data.exportDir,
           fileName: provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt',

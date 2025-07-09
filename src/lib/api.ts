@@ -61,7 +61,7 @@ export const api = {
     return response.json();
   },
 
-  async continueScan(request: ScanRequest & { vertexProjectId: string }): Promise<ScanResult> {
+  async continueScan(request: ScanRequest & { geminiApiKey: string }): Promise<ScanResult> {
     const response = await fetch(`${API_BASE}/continue-scan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -112,10 +112,16 @@ export class CloudSecurityWebSocket {
       }
     };
 
-    this.ws.onclose = () => {
-      console.log('🔌 Disconnected from server');
-      // Auto-reconnect after 3 seconds
-      setTimeout(() => this.connect(), 3000);
+    this.ws.onclose = (event) => {
+      console.log('🔌 Disconnected from server', event.reason);
+      this.ws = null;
+      // Auto-reconnect after 3 seconds, with exponential backoff if needed
+      setTimeout(() => {
+        if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
+          console.log('🔄 Attempting to reconnect...');
+          this.connect();
+        }
+      }, 3000);
     };
 
     this.ws.onerror = (error) => {

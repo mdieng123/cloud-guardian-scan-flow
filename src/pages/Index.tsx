@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,11 +15,48 @@ export type CloudProvider = 'GCP' | 'AZURE' | null;
 export type WorkflowStep = 'auth' | 'provider' | 'export' | 'scan' | 'results';
 
 const Index = () => {
-  const [currentStep, setCurrentStep] = useState<WorkflowStep>('auth');
-  const [cloudProvider, setCloudProvider] = useState<CloudProvider>(null);
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [exportData, setExportData] = useState<any>(null);
-  const [scanResults, setScanResults] = useState<any>(null);
+  // Load initial state from localStorage
+  const [currentStep, setCurrentStep] = useState<WorkflowStep>(() => {
+    const saved = localStorage.getItem('cloudSecurityStep');
+    return (saved as WorkflowStep) || 'auth';
+  });
+  const [cloudProvider, setCloudProvider] = useState<CloudProvider>(() => {
+    const saved = localStorage.getItem('cloudSecurityProvider');
+    return (saved as CloudProvider) || null;
+  });
+  const [isAuthenticated, setIsAuthenticated] = useState(() => {
+    const saved = localStorage.getItem('cloudSecurityAuth');
+    return saved === 'true';
+  });
+  const [exportData, setExportData] = useState<any>(() => {
+    const saved = localStorage.getItem('cloudSecurityExportData');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [scanResults, setScanResults] = useState<any>(() => {
+    const saved = localStorage.getItem('cloudSecurityScanResults');
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  // Persist state to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('cloudSecurityStep', currentStep);
+  }, [currentStep]);
+
+  useEffect(() => {
+    localStorage.setItem('cloudSecurityProvider', cloudProvider || '');
+  }, [cloudProvider]);
+
+  useEffect(() => {
+    localStorage.setItem('cloudSecurityAuth', isAuthenticated.toString());
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    localStorage.setItem('cloudSecurityExportData', JSON.stringify(exportData));
+  }, [exportData]);
+
+  useEffect(() => {
+    localStorage.setItem('cloudSecurityScanResults', JSON.stringify(scanResults));
+  }, [scanResults]);
 
   const steps = [
     { id: 'auth', label: 'Authentication', icon: Shield, description: 'Verify cloud credentials' },
@@ -62,6 +99,14 @@ const Index = () => {
   };
 
   const resetWorkflow = () => {
+    // Clear localStorage
+    localStorage.removeItem('cloudSecurityStep');
+    localStorage.removeItem('cloudSecurityProvider');
+    localStorage.removeItem('cloudSecurityAuth');
+    localStorage.removeItem('cloudSecurityExportData');
+    localStorage.removeItem('cloudSecurityScanResults');
+    
+    // Reset state
     setCurrentStep('auth');
     setCloudProvider(null);
     setIsAuthenticated(false);
@@ -84,8 +129,8 @@ const Index = () => {
                 <p className="text-gray-600">Terraform Export & Security Analysis Tool v1.0</p>
               </div>
             </div>
-            <Button variant="outline" onClick={resetWorkflow}>
-              Reset Workflow
+            <Button variant="outline" onClick={resetWorkflow} title="Clear all saved progress and start over">
+              Clear Session
             </Button>
           </div>
         </div>

@@ -689,8 +689,13 @@ EOF
         echo -e "${GREEN}✓ Prowler JSON cleaned successfully!${NC}"
         echo -e "Cleaned output saved to: ${BLUE}${cleaned_output}${NC}"
         
-        # Save cleaned file path to global variable
-        PROWLER_CLEANED_FILE="$cleaned_output"
+        # Copy the cleaned file to root directory for consolidation access
+        local cleaned_filename=$(basename "$cleaned_output")
+        cp "$cleaned_output" "./$cleaned_filename"
+        echo -e "${YELLOW}Copied cleaned file to root directory for consolidation: ./${cleaned_filename}${NC}"
+        
+        # Save cleaned file path to global variable (use root directory copy)
+        PROWLER_CLEANED_FILE="./$cleaned_filename"
         
         # Show statistics
         local original_size=$(du -h "$input_file" | cut -f1)
@@ -718,25 +723,34 @@ EOF
 function launch_consolidation_analysis() {
     echo ""
     echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}Launching Consolidation Analysis${NC}"
+    echo -e "${GREEN}Launching LlamaIndex Consolidation Analysis${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
     
-    # Check if gemini CLI is available
-    if ! command -v gemini &> /dev/null; then
-        echo -e "${RED}✗ Gemini CLI is not installed!${NC}"
-        echo "Please install Gemini CLI first or use alternative method"
+    # Check if Python3 is available
+    if ! command -v python3 &> /dev/null; then
+        echo -e "${RED}✗ Python3 is not installed!${NC}"
+        echo "Please install Python3 first"
         return 1
     fi
     
-    # Validate input files exist
+    # Debug and validate input files exist
+    echo "DEBUG: Current working directory: $(pwd)"
+    echo "DEBUG: GEMINI_ANALYSIS_FILE='$GEMINI_ANALYSIS_FILE'"
+    echo "DEBUG: PROWLER_CLEANED_FILE='$PROWLER_CLEANED_FILE'"
+    echo "DEBUG: Checking if files exist..."
+    
     if [[ ! -f "$GEMINI_ANALYSIS_FILE" ]]; then
         echo -e "${RED}✗ Gemini analysis file not found: $GEMINI_ANALYSIS_FILE${NC}"
+        echo "DEBUG: Available security_analysis files:"
+        ls -la security_analysis_*.txt 2>/dev/null || echo "No security_analysis files found"
         return 1
     fi
     
     if [[ ! -f "$PROWLER_CLEANED_FILE" ]]; then
         echo -e "${RED}✗ Prowler cleaned file not found: $PROWLER_CLEANED_FILE${NC}"
+        echo "DEBUG: Available prowler files:"
+        ls -la prowler_scan_*.json 2>/dev/null || echo "No prowler files found"
         return 1
     fi
     
@@ -748,50 +762,174 @@ function launch_consolidation_analysis() {
     # Create output filename
     local consolidation_output="consolidated_security_report_$(date +%Y%m%d_%H%M%S).md"
     
-    # Create the Gemini CLI prompt with multi-file reading and web search
-    local consolidation_prompt="Use the read_many_files tool to read these files: ['${PROWLER_CLEANED_FILE}', '${GEMINI_ANALYSIS_FILE}']. Then use google_web_search to verify any critical findings. Create a comprehensive security assessment report that:
-
-1. CROSS-VERIFICATION: Compare findings from both sources and identify:
-   - Overlapping vulnerabilities (found by both tools)
-   - Unique findings from each tool
-   - Any contradictions or inconsistencies
-
-2. SEVERITY PRIORITIZATION: Rank all findings by actual risk:
-   - CRITICAL: Immediate action required
-   - HIGH: Address within 7 days
-   - MEDIUM: Address within 30 days
-   - LOW: Best practice improvements
-
-3. ENHANCED EVIDENCE: For each CRITICAL and HIGH finding:
-   - Use google_web_search to find recent exploits or breaches
-   - Include CVSS scores if applicable
-   - Add real-world impact examples
-
-4. EXECUTIVE SUMMARY: 1-page overview with:
-   - Total vulnerabilities by severity
-   - Top 5 risks with business impact
-   - Recommended timeline for remediation
-
-5. TECHNICAL DETAILS: For each finding include:
-   - Description of the vulnerability
-   - Affected resources/configurations
-   - Step-by-step remediation with exact commands/configs
-   - References and documentation links
-
-6. REMEDIATION ROADMAP: Actionable plan with:
-   - Quick wins (can be fixed in <1 hour)
-   - Short-term fixes (1-7 days)
-   - Long-term improvements (>7 days)
-   - Dependencies between fixes
-
-Format as professional Markdown suitable for client presentation."
+    # Create LlamaIndex consolidation script with context-aware analysis
+    local temp_consolidator="temp_consolidation_script_$$.py"
     
-    echo -e "${YELLOW}Running Gemini consolidation analysis...${NC}"
-    echo "This may take several minutes due to web searches and analysis..."
+    # Write the LlamaIndex consolidation script
+    cat > "$temp_consolidator" << 'EOF'
+#!/usr/bin/env python3
+"""
+Simple LlamaIndex Consolidation - Direct File Reading (No RAG)
+Reads Gemini analysis and Prowler findings directly and creates consolidation report
+"""
+
+import os
+import sys
+from datetime import datetime
+from llama_index.llms.google_genai import GoogleGenAI
+
+def main():
+    if len(sys.argv) != 4:
+        print("Usage: python3 script.py <gemini_file> <prowler_file> <output_file>")
+        sys.exit(1)
+    
+    gemini_file = sys.argv[1]
+    prowler_file = sys.argv[2]
+    output_file = sys.argv[3]
+    
+    print("DEBUG: Starting simple consolidation analysis...")
+    print(f"DEBUG: Gemini file: {gemini_file}")
+    print(f"DEBUG: Prowler file: {prowler_file}")
+    print(f"DEBUG: Output file: {output_file}")
+    
+    # Setup Gemini 2.5 Flash with reduced output tokens
+    llm = GoogleGenAI(
+        model="gemini-2.5-flash",
+        max_tokens=8000,  # Reduced to avoid MAX_TOKENS error
+        temperature=0.1
+    )
+    
+    
+    try:
+        # Read both files directly
+        print("DEBUG: Reading Gemini analysis file...")
+        with open(gemini_file, 'r', encoding='utf-8') as f:
+            gemini_content = f.read()
+        
+        print("DEBUG: Reading Prowler findings file...")
+        with open(prowler_file, 'r', encoding='utf-8') as f:
+            prowler_content = f.read()
+        
+        print(f"DEBUG: Gemini analysis length: {len(gemini_content)} characters")
+        print(f"DEBUG: Prowler findings length: {len(prowler_content)} characters")
+        
+        # Create consolidation prompt with both contents
+        consolidation_prompt = f"""
+You are a senior cybersecurity consultant. Analyze the provided Gemini AI security analysis and Prowler vulnerability scan findings to create a concise executive-level security consolidation report.
+
+GEMINI AI SECURITY ANALYSIS:
+{gemini_content}
+
+PROWLER VULNERABILITY FINDINGS:
+{prowler_content}
+
+Create a professional consolidation report with these sections:
+
+## Executive Summary
+- Overall security posture rating (CRITICAL/HIGH/MEDIUM/LOW)
+- Total vulnerability count by severity
+- Top 5 most critical issues requiring immediate attention
+- Business impact assessment
+
+## Critical Findings Correlation
+- Issues confirmed by BOTH tools (highest confidence)
+- Unique findings from each tool
+- Priority vulnerabilities requiring immediate action
+
+## Risk Prioritization
+- CRITICAL (P0): Immediate remediation (0-24 hours)
+- HIGH (P1): Priority remediation (1-7 days) 
+- MEDIUM (P2): Planned remediation (1-30 days)
+- LOW (P3): Strategic improvements (30+ days)
+
+## Remediation Roadmap
+- Step-by-step fixes for critical and high-risk issues
+- Terraform code corrections where applicable
+- Implementation timeline
+
+Format as professional Markdown suitable for executive review. Keep concise but comprehensive.
+"""
+        
+        print("DEBUG: Generating consolidation analysis...")
+        
+        # Generate the consolidation report
+        response = llm.complete(consolidation_prompt)
+        consolidation_report = response.text if hasattr(response, 'text') else str(response)
+        
+        print(f"DEBUG: Consolidation completed - response length: {len(consolidation_report)} characters")
+        
+        # Create final report with metadata
+        final_report = f"""# Cloud Security Consolidation Analysis Report
+
+**Project:** inbound-entity-461511-j4  
+**Analysis Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
+**Analysis Method:** Direct File Analysis + LlamaIndex LLM  
+**Report Classification:** CONFIDENTIAL - Internal Security Assessment  
+
+---
+
+{consolidation_report}
+
+---
+
+## Technical Analysis Details
+
+**Analysis Framework:** Direct file reading with LlamaIndex LLM  
+**Model:** Gemini 2.5 Flash  
+**Temperature:** 0.1 (focused analysis)  
+**Source Files:** Gemini AI security analysis + Prowler vulnerability scan  
+
+*This report consolidates findings from automated security analysis tools and should be reviewed by qualified security professionals.*
+"""
+        
+        # Write to output file
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(final_report)
+        
+        print(f"✅ Consolidation analysis completed successfully!")
+        print(f"📁 Report saved to: {output_file}")
+        print(f"📊 Report size: {len(final_report):,} characters")
+        
+    except Exception as e:
+        print(f"❌ ERROR: Consolidation analysis failed: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+EOF
+
+    echo -e "${YELLOW}Running LlamaIndex consolidation analysis...${NC}"
+    echo "This may take several minutes for comprehensive context-aware analysis..."
     echo ""
     
-    # Run gemini with the consolidation prompt
-    gemini -p $consolidation_prompt >> $consolidation_output
+    # Run the consolidation analysis
+    echo "DEBUG: About to run LlamaIndex consolidation"
+    echo "DEBUG: GEMINI_ANALYSIS_FILE=$GEMINI_ANALYSIS_FILE"
+    echo "DEBUG: PROWLER_CLEANED_FILE=$PROWLER_CLEANED_FILE"
+    echo "DEBUG: consolidation_output=$consolidation_output"
+    
+    # Execute the Python consolidation script with virtual environment
+    echo "DEBUG: Activating Python virtual environment..."
+    if [[ -d "llama_env" ]]; then
+        source llama_env/bin/activate
+        echo "DEBUG: Virtual environment activated"
+    else
+        echo "DEBUG: Virtual environment not found, using system python3"
+    fi
+    
+    # Set API key for the consolidation script
+    export GOOGLE_API_KEY="${GOOGLE_API_KEY:-}"
+    
+    python3 "$temp_consolidator" "$GEMINI_ANALYSIS_FILE" "$PROWLER_CLEANED_FILE" "$consolidation_output"
+    local consolidation_exit_code=$?
+    
+    # Cleanup temp file
+    rm -f "$temp_consolidator"
+    
+    echo "DEBUG: Gemini exit code: $gemini_exit_code"
+    echo "DEBUG: Output file size: $(wc -c < "$consolidation_output" 2>/dev/null || echo "0") bytes"
     echo -e "${GREEN}✓ Consolidation analysis completed successfully!${NC}"
     echo -e "Consolidated report saved to: ${BLUE}$consolidation_output${NC}"
     
@@ -865,15 +1003,24 @@ function launch_gemini_security_scanner() {
    cat > "$temp_scanner" << 'EOF'
 #!/usr/bin/env python3
 """
-Terraform Security Scanner - Minimal Version
-Using GoogleGenAI with Vertex AI configuration
+Terraform Security Scanner - Workflows Version
+Using LlamaIndex Workflows for modern event-driven architecture
 """
-
 
 import os
 from datetime import datetime
-from vertexai.preview import reasoning_engines
+from llama_index.core.workflow import (
+    Event,
+    StartEvent,
+    StopEvent,
+    Workflow,
+    step,
+)
+from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
 from llama_index.llms.google_genai import GoogleGenAI
+from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
+from llama_index.core.response_synthesizers import get_response_synthesizer
+# No longer need google.auth for embeddings
 
 
 # Configuration
@@ -883,65 +1030,124 @@ TERRAFORM_DIR = "__TERRAFORM_DIR__"
 OUTPUT_FILE = f"security_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
 
 
+# Custom events for the workflow
+class RetrieveEvent(Event):
+    """Event containing retrieved nodes from documents"""
+    nodes: list
+    query: str
 
 
-# Setup LLM with Vertex AI config (as per your example)
+class AnalyzeEvent(Event):
+    """Event containing analysis results"""
+    analysis: str
+
+
+# Setup LLM with Google GenAI using API key (using Flash for 1M token context)
 llm = GoogleGenAI(
-   model="gemini-2.0-flash",
-   vertexai_config={
-       "project": PROJECT_ID,
-       "location": LOCATION
-   },
-   context_window=200000,
-   max_tokens=20000,
+   model="gemini-2.5-flash",  # Changed to Flash for 1M token context window
+   max_tokens=32000,  # Output tokens for response
+   # Will use GOOGLE_API_KEY environment variable automatically
 )
 
 
-# Create agent with retriever
-def retriever_builder(model, retriever_kwargs=None):
-   """Build retriever for terraform files"""
-   from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
-   from llama_index.embeddings.vertex import VertexTextEmbedding
-   import google.auth
-  
-   # Get credentials and create embeddings
-   credentials, _ = google.auth.default()
-   embed_model = VertexTextEmbedding(
-       model_name="text-embedding-005",
-       project=PROJECT_ID,
-       location=LOCATION,
-       credentials=credentials
-   )
-  
-   # Load terraform files
-   reader = SimpleDirectoryReader(TERRAFORM_DIR, required_exts=[".txt"])
-   documents = reader.load_data()
-  
-   # Create index using our configured llm
-   index = VectorStoreIndex.from_documents(
-       documents,
-       llm=llm,  # Use the GoogleGenAI instance
-       embed_model=embed_model
-   )
-  
-   return index.as_retriever()
+# Security Analysis Workflow using LlamaIndex Workflows
+class SecurityAnalysisWorkflow(Workflow):
+    """
+    Event-driven workflow for Terraform security analysis
+    """
+    
+    @step
+    async def retrieve_terraform_docs(self, ev: StartEvent) -> RetrieveEvent:
+        """Step 1: Load all Terraform documents directly (no RAG needed with 1M token context)"""
+        print("DEBUG: Loading Terraform documents directly...")
+        
+        # Load terraform files directly - no indexing needed with 1M token context
+        reader = SimpleDirectoryReader(TERRAFORM_DIR, required_exts=[".txt"])
+        documents = reader.load_data()
+        print(f"DEBUG: Loaded {len(documents)} documents for direct analysis")
+        
+        if not documents:
+            print("ERROR: No Terraform documents found!")
+            return RetrieveEvent(nodes=[], query=ev.query)
+        
+        # Create simple nodes from documents (no vector search needed)
+        from llama_index.core.schema import TextNode
+        nodes = []
+        for doc in documents:
+            node = TextNode(text=doc.text, metadata=doc.metadata)
+            nodes.append(node)
+        
+        print(f"DEBUG: Created {len(nodes)} nodes for direct analysis")
+        return RetrieveEvent(nodes=nodes, query=ev.query)
+    
+    @step
+    async def analyze_security(self, ev: RetrieveEvent) -> AnalyzeEvent:
+        """Step 2: Perform security analysis on all Terraform configurations"""
+        print("DEBUG: Starting comprehensive security analysis...")
+        
+        if not ev.nodes:
+            analysis = "ERROR: No Terraform configurations found for analysis."
+            return AnalyzeEvent(analysis=analysis)
+        
+        # Combine all Terraform content (1M token context can handle it)
+        all_terraform_content = "\n\n=== TERRAFORM CONFIGURATION FILES ===\n\n"
+        for i, node in enumerate(ev.nodes):
+            all_terraform_content += f"--- File {i+1} ---\n{node.text}\n\n"
+        
+        # Prepare comprehensive security analysis prompt
+        security_prompt = f"""You are a cybersecurity expert specializing in Terraform infrastructure security analysis.
+
+CRITICAL INSTRUCTION: Analyze ALL provided Terraform configurations for security vulnerabilities and provide a comprehensive security report. Focus on identifying actual security issues, not just listing configurations.
+
+{all_terraform_content}
+
+USER QUERY: {ev.query}
+
+Provide a professional security assessment report with:
+
+1. **Executive Summary**: Brief overview of security posture and risk level
+2. **Critical Vulnerabilities**: CRITICAL severity issues with detailed explanations  
+3. **High-Risk Issues**: HIGH severity issues with explanations
+4. **Medium/Low Risk Issues**: Other security concerns
+5. **Remediation Steps**: Specific fixes for each vulnerability with code examples
+6. **Configuration Evidence**: Show problematic configuration snippets
+
+Focus on common cloud security issues:
+- Overly permissive firewall rules (0.0.0.0/0 access)
+- Unrestricted API keys or service accounts
+- Missing encryption configurations  
+- Inadequate logging and monitoring
+- Public resource exposure
+- Weak access controls
+- Default network configurations
+- Service account permissions
+
+Structure as a professional security vulnerability assessment with specific findings and actionable remediation steps."""
+
+        # Generate security analysis using LLM (1M token context should handle this easily)
+        try:
+            response = llm.complete(security_prompt)
+            analysis = response.text if hasattr(response, 'text') else str(response)
+        except Exception as e:
+            print(f"ERROR: Security analysis failed: {e}")
+            analysis = f"ERROR: Security analysis failed due to: {str(e)}"
+        
+        print("DEBUG: Security analysis completed")
+        return AnalyzeEvent(analysis=analysis)
+    
+    @step
+    async def finalize_report(self, ev: AnalyzeEvent) -> StopEvent:
+        """Step 3: Finalize and format the security report"""
+        print("DEBUG: Finalizing security report...")
+        
+        # Create final formatted report
+        final_report = f"TERRAFORM SECURITY ANALYSIS\n\n{ev.analysis}"
+        
+        return StopEvent(result=final_report)
 
 
-def response_synthesizer_builder(model, response_synthesizer_kwargs=None):
-   from llama_index.core.response_synthesizers import SimpleSummarize
-
-
-   return SimpleSummarize(llm=model)
-
-
-# Create the agent
-agent = reasoning_engines.LlamaIndexQueryPipelineAgent(
-   model="gemini-2.0-flash",
-   model_kwargs={"temperature": 0.1},
-   system_instruction="You are a Terraform security expert. Find all security vulnerabilities and detail why it is a vulnerability. and provide a fix",
-   retriever_builder=retriever_builder,
-   response_synthesizer_builder=response_synthesizer_builder,
-)
+# Create workflow instance
+workflow = SecurityAnalysisWorkflow(timeout=300, verbose=True)
 
 
 
@@ -961,21 +1167,39 @@ if __name__ == "__main__":
    print("Running security analysis...")
 
 
-   # Use agent.query() to analyze
-   response = agent.query(input="""
-   Analyze all Terraform files within the terraform_dir you have access to for security issues. Include:
-   1. All vulnerabilities with severity (CRITICAL/HIGH/MEDIUM/LOW)- MUST INCLUDE EXPLANATION OF THE VULNERABILITY
-   2. Affected resources
-   3. MUST INCLUDE How to fix each issue in 2 or 3sentence
-   4.also include the configuration itself as evidence
-   """)
-  
-   # Save results
-   analysis = response['response'] if isinstance(response, dict) else str(response)
-   with open(OUTPUT_FILE, 'w') as f:
-       f.write(f"TERRAFORM SECURITY ANALYSIS\n\n{analysis}")
-  
-   print(f"✅ Analysis saved to: {OUTPUT_FILE}")
+   # Use workflow.run() for event-driven security analysis
+   print("DEBUG: About to run SecurityAnalysisWorkflow")
+   
+   import asyncio
+   
+   async def run_security_analysis():
+       result = await workflow.run(
+           query="Perform a comprehensive security vulnerability analysis of all Terraform configurations. Identify critical security issues, provide severity ratings, and recommend specific fixes."
+       )
+       return result
+   
+   # Run the workflow
+   try:
+       analysis_result = asyncio.run(run_security_analysis())
+       print(f"DEBUG: Workflow completed successfully")
+       print(f"DEBUG: Result type: {type(analysis_result)}")
+       
+       # Extract the analysis text from the workflow result
+       if hasattr(analysis_result, 'result'):
+           analysis = analysis_result.result
+       else:
+           analysis = str(analysis_result)
+       
+       # Save results
+       with open(OUTPUT_FILE, 'w') as f:
+           f.write(analysis)
+       
+       print(f"✅ Analysis saved to: {OUTPUT_FILE}")
+       
+   except Exception as e:
+       print(f"ERROR: Workflow execution failed: {e}")
+       print(f"DEBUG: Error type: {type(e)}")
+       raise
 EOF
 
 
