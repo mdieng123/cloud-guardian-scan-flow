@@ -723,7 +723,7 @@ EOF
 function launch_consolidation_analysis() {
     echo ""
     echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}Launching LlamaIndex Consolidation Analysis${NC}"
+    echo -e "${GREEN}Launching Enhanced Security Consolidation${NC}"
     echo -e "${GREEN}========================================${NC}"
     echo ""
     
@@ -734,218 +734,41 @@ function launch_consolidation_analysis() {
         return 1
     fi
     
-    # Debug and validate input files exist
-    echo "DEBUG: Current working directory: $(pwd)"
-    echo "DEBUG: GEMINI_ANALYSIS_FILE='$GEMINI_ANALYSIS_FILE'"
-    echo "DEBUG: PROWLER_CLEANED_FILE='$PROWLER_CLEANED_FILE'"
-    echo "DEBUG: Checking if files exist..."
-    
-    if [[ ! -f "$GEMINI_ANALYSIS_FILE" ]]; then
-        echo -e "${RED}✗ Gemini analysis file not found: $GEMINI_ANALYSIS_FILE${NC}"
-        echo "DEBUG: Available security_analysis files:"
-        ls -la security_analysis_*.txt 2>/dev/null || echo "No security_analysis files found"
+    # Check if consolidation script exists
+    if [[ ! -f "security_consolidation_script.py" ]]; then
+        echo -e "${RED}✗ Security consolidation script not found!${NC}"
         return 1
     fi
     
-    if [[ ! -f "$PROWLER_CLEANED_FILE" ]]; then
-        echo -e "${RED}✗ Prowler cleaned file not found: $PROWLER_CLEANED_FILE${NC}"
-        echo "DEBUG: Available prowler files:"
-        ls -la prowler_scan_*.json 2>/dev/null || echo "No prowler files found"
-        return 1
-    fi
-    
-    echo -e "${YELLOW}Consolidating findings from:${NC}"
-    echo -e "  Gemini Analysis: ${BLUE}$GEMINI_ANALYSIS_FILE${NC}"
-    echo -e "  Prowler Findings: ${BLUE}$PROWLER_CLEANED_FILE${NC}"
+    echo -e "${YELLOW}🔍 Auto-discovering analysis results...${NC}"
     echo ""
     
-    # Create output filename
-    local consolidation_output="consolidated_security_report_$(date +%Y%m%d_%H%M%S).md"
-    
-    # Create LlamaIndex consolidation script with context-aware analysis
-    local temp_consolidator="temp_consolidation_script_$$.py"
-    
-    # Write the LlamaIndex consolidation script
-    cat > "$temp_consolidator" << 'EOF'
-#!/usr/bin/env python3
-"""
-Simple LlamaIndex Consolidation - Direct File Reading (No RAG)
-Reads Gemini analysis and Prowler findings directly and creates consolidation report
-"""
-
-import os
-import sys
-from datetime import datetime
-from llama_index.llms.google_genai import GoogleGenAI
-
-def main():
-    if len(sys.argv) != 4:
-        print("Usage: python3 script.py <gemini_file> <prowler_file> <output_file>")
-        sys.exit(1)
-    
-    gemini_file = sys.argv[1]
-    prowler_file = sys.argv[2]
-    output_file = sys.argv[3]
-    
-    print("DEBUG: Starting simple consolidation analysis...")
-    print(f"DEBUG: Gemini file: {gemini_file}")
-    print(f"DEBUG: Prowler file: {prowler_file}")
-    print(f"DEBUG: Output file: {output_file}")
-    
-    # Setup Gemini 2.5 Flash with reduced output tokens
-    llm = GoogleGenAI(
-        model="gemini-2.5-flash",
-        max_tokens=8000,  # Reduced to avoid MAX_TOKENS error
-        temperature=0.1
-    )
-    
-    
-    try:
-        # Read both files directly
-        print("DEBUG: Reading Gemini analysis file...")
-        with open(gemini_file, 'r', encoding='utf-8') as f:
-            gemini_content = f.read()
-        
-        print("DEBUG: Reading Prowler findings file...")
-        with open(prowler_file, 'r', encoding='utf-8') as f:
-            prowler_content = f.read()
-        
-        print(f"DEBUG: Gemini analysis length: {len(gemini_content)} characters")
-        print(f"DEBUG: Prowler findings length: {len(prowler_content)} characters")
-        
-        # Create consolidation prompt with both contents
-        consolidation_prompt = f"""
-You are a senior cybersecurity consultant. Analyze the provided Gemini AI security analysis and Prowler vulnerability scan findings to create a concise executive-level security consolidation report.
-
-GEMINI AI SECURITY ANALYSIS:
-{gemini_content}
-
-PROWLER VULNERABILITY FINDINGS:
-{prowler_content}
-
-Create a professional consolidation report with these sections:
-
-## Executive Summary
-- Overall security posture rating (CRITICAL/HIGH/MEDIUM/LOW)
-- Total vulnerability count by severity
-- Top 5 most critical issues requiring immediate attention
-- Business impact assessment
-
-## Critical Findings Correlation
-- Issues confirmed by BOTH tools (highest confidence)
-- Unique findings from each tool
-- Priority vulnerabilities requiring immediate action
-
-## Risk Prioritization
-- CRITICAL (P0): Immediate remediation (0-24 hours)
-- HIGH (P1): Priority remediation (1-7 days) 
-- MEDIUM (P2): Planned remediation (1-30 days)
-- LOW (P3): Strategic improvements (30+ days)
-
-## Remediation Roadmap
-- Step-by-step fixes for critical and high-risk issues
-- Terraform code corrections where applicable
-- Implementation timeline
-
-Format as professional Markdown suitable for executive review. Keep concise but comprehensive.
-"""
-        
-        print("DEBUG: Generating consolidation analysis...")
-        
-        # Generate the consolidation report
-        response = llm.complete(consolidation_prompt)
-        consolidation_report = response.text if hasattr(response, 'text') else str(response)
-        
-        print(f"DEBUG: Consolidation completed - response length: {len(consolidation_report)} characters")
-        
-        # Create final report with metadata
-        final_report = f"""# Cloud Security Consolidation Analysis Report
-
-**Project:** inbound-entity-461511-j4  
-**Analysis Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
-**Analysis Method:** Direct File Analysis + LlamaIndex LLM  
-**Report Classification:** CONFIDENTIAL - Internal Security Assessment  
-
----
-
-{consolidation_report}
-
----
-
-## Technical Analysis Details
-
-**Analysis Framework:** Direct file reading with LlamaIndex LLM  
-**Model:** Gemini 2.5 Flash  
-**Temperature:** 0.1 (focused analysis)  
-**Source Files:** Gemini AI security analysis + Prowler vulnerability scan  
-
-*This report consolidates findings from automated security analysis tools and should be reviewed by qualified security professionals.*
-"""
-        
-        # Write to output file
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(final_report)
-        
-        print(f"✅ Consolidation analysis completed successfully!")
-        print(f"📁 Report saved to: {output_file}")
-        print(f"📊 Report size: {len(final_report):,} characters")
-        
-    except Exception as e:
-        print(f"❌ ERROR: Consolidation analysis failed: {e}")
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
-EOF
-
-    echo -e "${YELLOW}Running LlamaIndex consolidation analysis...${NC}"
-    echo "This may take several minutes for comprehensive context-aware analysis..."
-    echo ""
-    
-    # Run the consolidation analysis
-    echo "DEBUG: About to run LlamaIndex consolidation"
-    echo "DEBUG: GEMINI_ANALYSIS_FILE=$GEMINI_ANALYSIS_FILE"
-    echo "DEBUG: PROWLER_CLEANED_FILE=$PROWLER_CLEANED_FILE"
-    echo "DEBUG: consolidation_output=$consolidation_output"
-    
-    # Execute the Python consolidation script with virtual environment
-    echo "DEBUG: Activating Python virtual environment..."
+    # Use the comprehensive consolidation script with auto-discovery
     if [[ -d "llama_env" ]]; then
-        source llama_env/bin/activate
-        echo "DEBUG: Virtual environment activated"
+        echo -e "${BLUE}Activating LlamaIndex virtual environment...${NC}"
+        source llama_env/bin/activate && python3 "security_consolidation_script.py" "$vertex_project_id" "." "$gemini_api_key"
     else
-        echo "DEBUG: Virtual environment not found, using system python3"
+        echo -e "${BLUE}Running consolidation script...${NC}"
+        python3 "security_consolidation_script.py" "$vertex_project_id" "." "$gemini_api_key"
     fi
     
-    # Set API key for the consolidation script
-    export GOOGLE_API_KEY="${GOOGLE_API_KEY:-}"
+    local exit_code=$?
     
-    python3 "$temp_consolidator" "$GEMINI_ANALYSIS_FILE" "$PROWLER_CLEANED_FILE" "$consolidation_output"
-    local consolidation_exit_code=$?
-    
-    # Cleanup temp file
-    rm -f "$temp_consolidator"
-    
-    echo "DEBUG: Gemini exit code: $gemini_exit_code"
-    echo "DEBUG: Output file size: $(wc -c < "$consolidation_output" 2>/dev/null || echo "0") bytes"
-    echo -e "${GREEN}✓ Consolidation analysis completed successfully!${NC}"
-    echo -e "Consolidated report saved to: ${BLUE}$consolidation_output${NC}"
-    
-    # Show file statistics
-    local file_size=$(du -h "$consolidation_output" | cut -f1)
-    local line_count=$(wc -l < "$consolidation_output")
-    echo -e "Report size: ${file_size}, Lines: ${line_count}"
-    
-    # Save metadata
-    echo "Consolidation completed at: $(date)" > "consolidation_metadata.txt"
-    echo "Gemini Analysis File: $GEMINI_ANALYSIS_FILE" >> "consolidation_metadata.txt"
-    echo "Prowler Cleaned File: $PROWLER_CLEANED_FILE" >> "consolidation_metadata.txt"
-    echo "Consolidated Report: $(pwd)/$consolidation_output" >> "consolidation_metadata.txt"
-    
-    return 0
-   
+    if [[ $exit_code -eq 0 ]]; then
+        echo -e "${GREEN}✅ Security consolidation completed successfully!${NC}"
+        
+        # Find the generated final report
+        FINAL_SECURITY_REPORT=$(ls -t final_security_report_*.md 2>/dev/null | head -1)
+        if [[ -n "$FINAL_SECURITY_REPORT" ]]; then
+            echo -e "${GREEN}📄 Final security report: $FINAL_SECURITY_REPORT${NC}"
+            export FINAL_SECURITY_REPORT
+        fi
+        
+        return 0
+    else
+        echo -e "${RED}❌ Security consolidation failed with exit code: $exit_code${NC}"
+        return 1
+    fi
 }
 
 #######################################
@@ -1010,8 +833,12 @@ function launch_gemini_security_scanner() {
    if [[ $scanner_exit_code -eq 0 ]]; then
        echo -e "${GREEN}✓ Gemini Security scan completed successfully!${NC}"
        
-       # Find and save the gemini analysis file path
-       GEMINI_ANALYSIS_FILE=$(ls -t security_analysis_*.txt 2>/dev/null | head -1)
+       # Find and save the gemini analysis file path (check enhanced first)
+       GEMINI_ANALYSIS_FILE=$(ls -t enhanced_security_analysis_*.txt 2>/dev/null | head -1)
+       if [[ -z "$GEMINI_ANALYSIS_FILE" ]]; then
+           GEMINI_ANALYSIS_FILE=$(ls -t security_analysis_*.txt 2>/dev/null | head -1)
+       fi
+       
        if [[ -n "$GEMINI_ANALYSIS_FILE" ]]; then
            echo -e "${GREEN}Gemini analysis saved to: ${GEMINI_ANALYSIS_FILE}${NC}"
            # Export the variable so it's available to other functions

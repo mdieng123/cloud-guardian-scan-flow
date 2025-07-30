@@ -218,6 +218,12 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
     
     try {
       if (geminiApiKey.trim()) {
+        // Reset status to running and show Gemini phase
+        setScanStatus('running');
+        setCurrentPhase('gemini');
+        setScanProgress(50); // Start from 50% since Prowler is done
+        setScanOutput(prev => prev + '\n🧠 Starting Gemini AI security analysis...\n');
+        
         const projectIdToUse = exportData.projectId || (provider === 'GCP' ? 'inbound-entity-461511-j4' : undefined);
         
         await api.continueScan({

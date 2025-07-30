@@ -17,6 +17,8 @@ const wss = new WebSocketServer({ server });
 app.use(cors());
 app.use(express.json());
 
+// File upload will be implemented later
+
 // Store active connections
 const connections = new Map();
 
@@ -411,6 +413,294 @@ WRAPPER_EOF
   }
 });
 
+// Download final security report
+app.get('/api/download-final-report', async (req, res) => {
+  try {
+    console.log('Download final report endpoint called');
+    const searchDir = path.join(__dirname, '..');
+    console.log('Searching in directory:', searchDir);
+    
+    // Find the most recent final security report
+    const reportFiles = glob.sync('final_security_report_*.md', { 
+      cwd: searchDir,
+      absolute: true 
+    });
+    
+    console.log('Found report files:', reportFiles);
+    
+    if (reportFiles.length === 0) {
+      console.log('No final security reports found');
+      return res.status(404).json({ error: 'No final security report found' });
+    }
+    
+    // Get the most recent file
+    const mostRecentReport = reportFiles.sort((a, b) => {
+      const statA = fs.statSync(a);
+      const statB = fs.statSync(b);
+      return statB.mtime.getTime() - statA.mtime.getTime();
+    })[0];
+    
+    console.log('Most recent report:', mostRecentReport);
+    
+    // Check if file exists and is readable
+    if (!fs.existsSync(mostRecentReport)) {
+      console.log('File does not exist:', mostRecentReport);
+      return res.status(404).json({ error: 'Final security report file not found' });
+    }
+    
+    // Get file stats
+    const stats = fs.statSync(mostRecentReport);
+    console.log('File size:', stats.size, 'bytes');
+    
+    // Set appropriate headers for markdown download
+    const filename = path.basename(mostRecentReport);
+    console.log('Setting filename:', filename);
+    
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Type', 'text/markdown');
+    res.setHeader('Content-Length', stats.size);
+    
+    // Stream the file
+    console.log('Starting file stream...');
+    const fileStream = fs.createReadStream(mostRecentReport);
+    fileStream.pipe(res);
+    
+    fileStream.on('error', (error) => {
+      console.error('Error streaming final report:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Error reading final security report' });
+      }
+    });
+    
+    fileStream.on('end', () => {
+      console.log('File stream completed successfully');
+    });
+    
+  } catch (error) {
+    console.error('Error downloading final report:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Upload document for RAG knowledge base (temporarily disabled)
+app.post('/api/upload-document', async (req, res) => {
+  try {
+    const { geminiApiKey } = req.body;
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    if (!geminiApiKey) {
+      return res.status(400).json({ error: 'Gemini API key required' });
+    }
+
+    // Create uploads directory if it doesn't exist
+    const uploadsDir = path.join(__dirname, '..', 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      fs.mkdirSync(uploadsDir, { recursive: true });
+    }
+
+    // Generate unique filename
+    const fileId = Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9);
+    const filename = `${fileId}_${file.originalname}`;
+    const filepath = path.join(uploadsDir, filename);
+
+    // Save file
+    fs.writeFileSync(filepath, file.buffer);
+
+    // Process file for RAG (this would integrate with your LlamaIndex setup)
+    // For now, just return success
+    res.json({
+      id: fileId,
+      filename: filename,
+      originalName: file.originalname,
+      size: file.size,
+      type: file.mimetype
+    });
+
+  } catch (error) {
+    console.error('Document upload error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Security chat endpoint
+app.post('/api/security-chat', async (req, res) => {
+  try {
+    const { message, geminiApiKey, uploadedDocuments, scanResults } = req.body;
+
+    if (!message || !geminiApiKey) {
+      return res.status(400).json({ error: 'Message and API key required' });
+    }
+
+    // Create the Python RAG chat script dynamically
+    const chatScript = `
+import sys
+import json
+import asyncio
+from pathlib import Path
+from llama_index.llms.google_genai import GoogleGenAI
+from llama_index.core import SimpleDirectoryReader, VectorStoreIndex, Settings
+from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
+
+async def run_security_chat():
+    try:
+        # Parse input
+        message = sys.argv[1]
+        api_key = sys.argv[2]
+        
+        # Initialize LLM and embeddings
+        Settings.llm = GoogleGenAI(
+            model="gemini-2.0-flash",
+            api_key=api_key,
+            max_tokens=4000,
+            temperature=0.3
+        )
+        
+        Settings.embed_model = GoogleGenAIEmbedding(
+            model_name="text-embedding-004",
+            api_key=api_key
+        )
+        
+        # Load security documents
+        documents = []
+        
+        # Load enhanced Gemini analysis
+        gemini_files = list(Path('.').glob('enhanced_security_analysis_*.txt'))
+        if gemini_files:
+            reader = SimpleDirectoryReader(input_files=[str(max(gemini_files, key=lambda f: f.stat().st_mtime))])
+            documents.extend(reader.load_data())
+        
+        # Load Prowler results
+        prowler_files = list(Path('.').glob('prowler_scan_*_cleaned.json'))
+        if prowler_files:
+            reader = SimpleDirectoryReader(input_files=[str(max(prowler_files, key=lambda f: f.stat().st_mtime))])
+            documents.extend(reader.load_data())
+        
+        # Load final report
+        final_reports = list(Path('.').glob('final_security_report_*.md'))
+        if final_reports:
+            reader = SimpleDirectoryReader(input_files=[str(max(final_reports, key=lambda f: f.stat().st_mtime))])
+            documents.extend(reader.load_data())
+        
+        # Load uploaded documents
+        uploads_dir = Path('uploads')
+        if uploads_dir.exists():
+            upload_files = list(uploads_dir.glob('*'))
+            if upload_files:
+                reader = SimpleDirectoryReader(input_dir=str(uploads_dir))
+                documents.extend(reader.load_data())
+        
+        if not documents:
+            print(json.dumps({
+                "response": "I don't have access to any security documents yet. Please ensure your security scan has completed and try again.",
+                "sources": []
+            }))
+            return
+        
+        # Create index
+        index = VectorStoreIndex.from_documents(documents)
+        query_engine = index.as_query_engine(
+            similarity_top_k=5,
+            response_mode="tree_summarize"
+        )
+        
+        # Enhanced prompt for conversational security assistance
+        enhanced_prompt = f\"\"\"You are a helpful security analyst assistant. A user is asking about their security scan results and needs practical guidance.
+
+User question: {message}
+
+Please provide a helpful, conversational response that:
+1. Directly answers their question in plain language
+2. Provides actionable recommendations when relevant
+3. Explains technical concepts clearly
+4. Focuses on being helpful rather than just dumping data
+5. Includes specific evidence from the security documents when needed
+6. Offers next steps or follow-up suggestions
+
+Be conversational, helpful, and focused on practical security guidance.\"\"\"
+        
+        # Query the documents
+        response = query_engine.query(enhanced_prompt)
+        
+        # Extract sources from response
+        sources = []
+        if hasattr(response, 'source_nodes'):
+            for node in response.source_nodes:
+                if hasattr(node, 'metadata') and 'file_name' in node.metadata:
+                    sources.append(node.metadata['file_name'])
+        
+        # Clean up sources
+        sources = list(set(sources))[:3]  # Limit to 3 unique sources
+        
+        print(json.dumps({
+            "response": str(response.response),
+            "sources": sources
+        }))
+        
+    except Exception as e:
+        print(json.dumps({
+            "response": f"I encountered an error processing your request: {str(e)}. Please check your API key and try again.",
+            "sources": []
+        }))
+
+if __name__ == "__main__":
+    asyncio.run(run_security_chat())
+`;
+
+    // Save the script temporarily
+    const scriptPath = path.join(__dirname, '..', 'temp_chat_script.py');
+    fs.writeFileSync(scriptPath, chatScript);
+
+    // Run the chat script
+    const { spawn } = require('child_process');
+    const pythonProcess = spawn('python3', [scriptPath, message, geminiApiKey], {
+      cwd: path.join(__dirname, '..')
+    });
+
+    let output = '';
+    let errorOutput = '';
+
+    pythonProcess.stdout.on('data', (data) => {
+      output += data.toString();
+    });
+
+    pythonProcess.stderr.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+
+    pythonProcess.on('close', (code) => {
+      // Clean up temp script
+      fs.unlinkSync(scriptPath);
+
+      if (code === 0) {
+        try {
+          const result = JSON.parse(output);
+          res.json(result);
+        } catch (parseError) {
+          console.error('Failed to parse Python output:', output);
+          res.status(500).json({
+            response: "I encountered an error processing your request. Please try again.",
+            sources: []
+          });
+        }
+      } else {
+        console.error('Python script error:', errorOutput);
+        res.status(500).json({
+          response: "I encountered an error processing your request. Please check your API key and try again.",
+          sources: []
+        });
+      }
+    });
+
+  } catch (error) {
+    console.error('Security chat error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Continue scan with Gemini API key
 app.post('/api/continue-scan', async (req, res) => {
   const { exportDir, provider, projectId, geminiApiKey } = req.body;
@@ -459,7 +749,10 @@ app.post('/api/continue-scan', async (req, res) => {
         
         # Find the latest gemini analysis file (in case GEMINI_ANALYSIS_FILE wasn't exported)
         if [[ -z "\$GEMINI_ANALYSIS_FILE" ]]; then
-          GEMINI_ANALYSIS_FILE=\$(ls -t security_analysis_*.txt 2>/dev/null | head -1)
+          GEMINI_ANALYSIS_FILE=\$(ls -t enhanced_security_analysis_*.txt 2>/dev/null | head -1)
+          if [[ -z "\$GEMINI_ANALYSIS_FILE" ]]; then
+            GEMINI_ANALYSIS_FILE=\$(ls -t security_analysis_*.txt 2>/dev/null | head -1)
+          fi
         fi
         
         # Try consolidation if both files exist
@@ -467,10 +760,35 @@ app.post('/api/continue-scan', async (req, res) => {
           echo "Starting consolidation analysis..."
           echo "Using Gemini file: \$GEMINI_ANALYSIS_FILE"
           echo "Using Prowler file: \$PROWLER_CLEANED_FILE"
-          if launch_consolidation_analysis; then
-            echo "✓ Consolidation completed"
+          
+          # Run consolidation script directly
+          echo "Running security consolidation script..."
+          if [[ -d "llama_env" ]]; then
+            echo "Activating LlamaIndex virtual environment..."
+            if source llama_env/bin/activate && python3 "security_consolidation_script.py" "${projectId || ''}" "." "${geminiApiKey}"; then
+              echo "✓ Consolidation completed successfully"
+              
+              # Find the generated final report
+              FINAL_SECURITY_REPORT=\$(ls -t final_security_report_*.md 2>/dev/null | head -1)
+              if [[ -n "\$FINAL_SECURITY_REPORT" ]]; then
+                echo "📄 Final security report: \$FINAL_SECURITY_REPORT"
+              fi
+            else
+              echo "⚠ Consolidation failed, but continuing"
+            fi
           else
-            echo "⚠ Consolidation failed, but continuing"
+            echo "Running consolidation script with system Python..."
+            if python3 "security_consolidation_script.py" "${projectId || ''}" "." "${geminiApiKey}"; then
+              echo "✓ Consolidation completed successfully"
+              
+              # Find the generated final report
+              FINAL_SECURITY_REPORT=\$(ls -t final_security_report_*.md 2>/dev/null | head -1)
+              if [[ -n "\$FINAL_SECURITY_REPORT" ]]; then
+                echo "📄 Final security report: \$FINAL_SECURITY_REPORT"
+              fi
+            else
+              echo "⚠ Consolidation failed, but continuing"
+            fi
           fi
         else
           echo "⚠ Skipping consolidation - missing file paths"
@@ -515,9 +833,9 @@ app.post('/api/continue-scan', async (req, res) => {
         output,
         scanResults: {
           outputFiles: {
-            geminiAnalysis: scanSuccess ? 'security_analysis_*.txt' : null,
+            geminiAnalysis: scanSuccess ? 'enhanced_security_analysis_*.txt' : null,
             prowlerResults: scanSuccess ? 'prowler_scan_*_cleaned.json' : null,
-            consolidatedReport: scanSuccess ? 'consolidated_security_report_*.md' : null
+            finalSecurityReport: scanSuccess ? 'final_security_report_*.md' : null
           }
         },
         exitCode: code

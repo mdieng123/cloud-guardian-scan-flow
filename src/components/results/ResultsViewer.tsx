@@ -1,71 +1,106 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { 
   Download, 
   RefreshCw,
-  CheckCircle
+  CheckCircle,
+  MessageCircle
 } from 'lucide-react';
+import SecurityChatbot from '@/components/security/SecurityChatbot';
 
 interface ResultsViewerProps {
   results: any;
 }
 
 const ResultsViewer: React.FC<ResultsViewerProps> = ({ results }) => {
+  const [isChatbotOpen, setIsChatbotOpen] = useState(false);
 
-  const generateMarkdownReport = () => {
+  const downloadFinalSecurityReport = async () => {
+    try {
+      console.log('Attempting to download final security report...');
+      const response = await fetch('/api/download-final-report');
+      
+      console.log('Response status:', response.status, response.statusText);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn('Final security report not available:', response.status, errorText);
+        downloadFallbackReport();
+        return;
+      }
+      
+      // Get the filename from the response headers or use a default
+      const contentDisposition = response.headers.get('content-disposition');
+      let filename = `final_security_report_${new Date().toISOString().split('T')[0]}.md`;
+      
+      console.log('Content-Disposition header:', contentDisposition);
+      
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
+        if (filenameMatch) {
+          filename = filenameMatch[1];
+          console.log('Extracted filename:', filename);
+        }
+      }
+      
+      // Download the file
+      const blob = await response.blob();
+      console.log('Blob size:', blob.size);
+      
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      console.log('Download completed successfully');
+      
+    } catch (error) {
+      console.error('Error downloading final security report:', error);
+      // Fallback to generated report on error
+      downloadFallbackReport();
+    }
+  };
+
+  const downloadFallbackReport = () => {
     const markdown = `# Cloud Security Assessment Report
 
 ## Executive Summary
 ${results.executiveSummary || 'Security assessment completed successfully.'}
 
 ## Summary Statistics
-- **Total Findings:** ${results.summary.totalFindings}
-- **Critical:** ${results.summary.critical}
-- **High:** ${results.summary.high}
-- **Medium:** ${results.summary.medium}
-- **Low:** ${results.summary.low}
+- **Total Findings:** ${results.summary?.totalFindings || 'N/A'}
+- **Critical:** ${results.summary?.critical || 0}
+- **High:** ${results.summary?.high || 0}
+- **Medium:** ${results.summary?.medium || 0}
+- **Low:** ${results.summary?.low || 0}
 
 ## Analysis Sources
-- **Gemini AI Findings:** ${results.summary.geminiFindings || 0}
-- **Prowler Security Findings:** ${results.summary.prowlerFindings || 0}
-- **Overlapping Findings:** ${results.summary.overlappingFindings || 0}
+- **Gemini AI Analysis:** Enhanced ChromaDB-powered security scanner
+- **Prowler Security Findings:** Automated compliance and vulnerability scanner
+- **Consolidation:** One-shot LLM analysis combining both sources
 
-## Detailed Findings
-
-${results.findings.map((finding: any, index: number) => `
-### Finding ${index + 1}: ${finding.title}
-
-- **Severity:** ${finding.severity}
-- **Source:** ${finding.source}
-- **Description:** ${finding.description}
-- **Affected Resources:** ${finding.affectedResources?.join(', ') || 'N/A'}
-- **Remediation:** ${finding.remediation}
-
----
-`).join('')}
-
-## Raw Scan Output
+## Scan Output
 
 \`\`\`
-${results.rawOutput || 'No raw output available'}
+${results.rawOutput || results.output || 'Security scan completed successfully.'}
 \`\`\`
 
 ---
-*Report generated on ${new Date().toISOString()}*
+*Fallback report generated on ${new Date().toISOString()}*
+*For the complete consolidated analysis, please ensure the scan completed successfully.*
 `;
 
-    return markdown;
-  };
-
-  const downloadMarkdownReport = () => {
-    const markdown = generateMarkdownReport();
     const blob = new Blob([markdown], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `security-assessment-${new Date().toISOString().split('T')[0]}.md`;
+    a.download = `security-assessment-fallback-${new Date().toISOString().split('T')[0]}.md`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -93,18 +128,26 @@ ${results.rawOutput || 'No raw output available'}
             <span>Security Assessment Complete</span>
           </CardTitle>
           <CardDescription className="text-lg">
-            Your cloud security assessment has been completed successfully. You can now download the consolidated report or run a new assessment.
+            Your comprehensive security analysis has been completed successfully. The consolidated report combines AI-powered analysis with automated compliance checking.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col space-y-4 max-w-md mx-auto">
             <Button 
-              onClick={downloadMarkdownReport}
+              onClick={downloadFinalSecurityReport}
               className="w-full bg-blue-600 hover:bg-blue-700"
               size="lg"
             >
               <Download className="h-5 w-5 mr-3" />
-              Download Markdown Report
+              Download Final Security Report
+            </Button>
+            <Button 
+              onClick={() => setIsChatbotOpen(true)}
+              className="w-full bg-green-600 hover:bg-green-700"
+              size="lg"
+            >
+              <MessageCircle className="h-5 w-5 mr-3" />
+              Chat with Security Assistant
             </Button>
             <Button 
               onClick={runNewAssessment}
@@ -118,6 +161,13 @@ ${results.rawOutput || 'No raw output available'}
           </div>
         </CardContent>
       </Card>
+
+      {/* Security Chatbot Modal */}
+      <SecurityChatbot 
+        isOpen={isChatbotOpen}
+        onClose={() => setIsChatbotOpen(false)}
+        scanResults={results}
+      />
     </div>
   );
 };
