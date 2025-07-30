@@ -411,9 +411,9 @@ WRAPPER_EOF
   }
 });
 
-// Continue scan with Vertex AI project ID
+// Continue scan with Gemini API key
 app.post('/api/continue-scan', async (req, res) => {
-  const { exportDir, provider, projectId, vertexProjectId, geminiApiKey } = req.body;
+  const { exportDir, provider, projectId, geminiApiKey } = req.body;
   
   try {
     broadcast({ type: 'scan_phase', data: { phase: 'gemini' } });
@@ -424,22 +424,26 @@ app.post('/api/continue-scan', async (req, res) => {
     const bashScript = spawn('bash', ['-c', `
       export CLOUD_PROVIDER="${provider}"
       export PROJECT_ID="${projectId || ''}"
-      export VERTEX_PROJECT_ID="${vertexProjectId}"
       export GOOGLE_API_KEY="${geminiApiKey}"
       export LAST_EXPORT_DIR="${fullExportDir}"
       export LAST_EXPORT_FILE="${provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt'}"
       export HEADLESS_MODE="true"
       export SKIP_PROWLER="true"
       
-      echo "DEBUG SERVER: LAST_EXPORT_DIR before sourcing: '${fullExportDir}'"
-      echo "DEBUG SERVER: About to source script: ${scriptPath}"
+      echo "🚀 Starting Modern Gemini Security Analysis"
+      echo "📂 Export Directory: ${fullExportDir}"
+      echo "🔑 API Key: ${geminiApiKey ? '[PROVIDED]' : '[MISSING]'}"
+      echo "🆔 Project ID: ${projectId || ''}"
       
-      # Source the original script functions
-      source "${scriptPath}"
-      
+      # Use the modern scanner directly
       echo "--- Phase: Gemini AI Analysis ---"
-      if LAST_EXPORT_DIR="${fullExportDir}" launch_gemini_security_scanner; then
-        echo "✓ Gemini analysis completed"
+      if [[ -d "llama_env" ]]; then
+        source llama_env/bin/activate && python3 "gemini_security_scanner.py" "${projectId || ''}" "${fullExportDir}" "${geminiApiKey}"
+      else
+        python3 "gemini_security_scanner.py" "${projectId || ''}" "${fullExportDir}" "${geminiApiKey}"
+      fi
+      if [[ $? -eq 0 ]]; then
+        echo "✅ Modern Gemini analysis completed successfully"
         
         echo "--- Phase: Consolidation Analysis ---"
         # Find the latest prowler cleaned file
@@ -537,6 +541,85 @@ app.post('/api/continue-scan', async (req, res) => {
     
   } catch (error) {
     broadcast({ type: 'scan_error', data: error.message });
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Check for latest export endpoint
+app.post('/api/check-latest-export', async (req, res) => {
+  const { provider } = req.body;
+  
+  try {
+    const { glob } = await import('glob');
+    
+    // Look for existing export directories
+    const pattern = provider === 'GCP' ? 'gcp_export_*' : 'azure_export_*';
+    const matchedDirs = await glob(pattern, { cwd: path.join(__dirname, '..') });
+    
+    const exportDirs = matchedDirs
+      .map(dir => {
+        const fullPath = path.join(__dirname, '..', dir);
+        try {
+          const stats = fs.statSync(fullPath);
+          return {
+            path: fullPath,
+            name: dir,
+            created: stats.birthtime,
+            modified: stats.mtime
+          };
+        } catch (error) {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.modified.getTime() - a.modified.getTime());
+
+    if (exportDirs.length === 0) {
+      return res.json({ hasExport: false });
+    }
+
+    const latestExport = exportDirs[0];
+    
+    // Check if the export has the required files
+    const expectedFile = provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt';
+    const exportFilePath = path.join(latestExport.path, expectedFile);
+    
+    if (!fs.existsSync(exportFilePath)) {
+      return res.json({ hasExport: false });
+    }
+
+    // Try to extract project ID from metadata if available
+    let projectId = null;
+    let resourceGroup = null;
+    
+    const metadataPath = path.join(latestExport.path, 'export_metadata.txt');
+    if (fs.existsSync(metadataPath)) {
+      const metadata = fs.readFileSync(metadataPath, 'utf-8');
+      const projectMatch = metadata.match(/Project ID:\s*([a-zA-Z0-9-]+)/);
+      const resourceMatch = metadata.match(/Resource Group:\s*([^\n]+)/);
+      
+      if (projectMatch) projectId = projectMatch[1];
+      if (resourceMatch) resourceGroup = resourceMatch[1].trim();
+    }
+
+    const fileStats = fs.statSync(exportFilePath);
+    
+    res.json({
+      hasExport: true,
+      export: {
+        provider,
+        projectId,
+        resourceGroup,
+        exportPath: latestExport.path,
+        fileName: expectedFile,
+        fileSize: Math.round(fileStats.size / 1024) + ' KB',
+        timestamp: latestExport.modified.toISOString(),
+        age: Math.round((Date.now() - latestExport.modified.getTime()) / 1000 / 60) + ' minutes ago'
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error checking latest export:', error);
     res.status(500).json({ error: error.message });
   }
 });

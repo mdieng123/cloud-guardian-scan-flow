@@ -10,10 +10,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { Search, Shield, Zap, CheckCircle, RefreshCw, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { api, CloudSecurityWebSocket } from '@/lib/api';
+import type { CloudProvider } from '@/pages/Index';
 
 interface SecurityScannerProps {
   exportData: any;
-  provider: 'GCP' | 'AZURE' | null;
+  provider: CloudProvider;
   onComplete: (data: any) => void;
 }
 
@@ -21,6 +22,7 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
   // Debug: Log the exportData to see what we're getting
   console.log('SecurityScanner - exportData:', exportData);
   console.log('SecurityScanner - provider:', provider);
+  
   const [scanStatus, setScanStatus] = useState<'idle' | 'running' | 'waiting_vertex_id' | 'complete' | 'error'>('idle');
   const [currentPhase, setCurrentPhase] = useState<'prowler' | 'gemini' | 'consolidation' | null>(null);
   const [scanProgress, setScanProgress] = useState(0);
@@ -154,20 +156,27 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
   }, [currentPhase, provider, exportData, toast]);
 
   const startSecurityScan = async () => {
+    // Skip API call for AWS
+    if (provider === 'AWS') {
+      toast({
+        title: "AWS Scanning Not Available",
+        description: "AWS security scanning is not yet implemented.",
+        variant: "destructive"
+      });
+      return;
+    }
+    
     try {
       setScanStatus('running');
       setScanProgress(0);
-      setScanOutput('');
-      setCurrentPhase('gemini');
-
-      // Use exportData.projectId, or show error if missing
-      const projectIdToUse = exportData.projectId;
+      setScanOutput('Starting security scan...\n');
       
-      if (!projectIdToUse && provider === 'GCP') {
-        setScanStatus('error');
+      const projectIdToUse = exportData.projectId || (provider === 'GCP' ? 'inbound-entity-461511-j4' : undefined);
+      
+      if (provider === 'GCP' && !projectIdToUse) {
         toast({
-          title: "Missing Project ID",
-          description: "No project ID found in export data. Please re-run the export step.",
+          title: "Project ID Required",
+          description: "Project ID is required for GCP security scanning.",
           variant: "destructive"
         });
         return;
@@ -183,7 +192,7 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
     } catch (error) {
       setScanStatus('error');
       toast({
-        title: "Scan Failed to Start",
+        title: "Scan Failed",
         description: "Failed to start security scan. Make sure the backend server is running.",
         variant: "destructive"
       });
@@ -196,59 +205,18 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
     }
   };
 
-  const continueWithGeminiAPI = async () => {
-    if (!geminiApiKey.trim()) {
+  const continueWithGemini = async () => {
+    // Skip API call for AWS
+    if (provider === 'AWS') {
       toast({
-        title: "API Key Required",
-        description: "Please enter a valid Gemini API key.",
+        title: "AWS Scanning Not Available", 
+        description: "AWS security scanning is not yet implemented.",
         variant: "destructive"
       });
       return;
     }
-
+    
     try {
-      setScanStatus('running');
-      setCurrentPhase('gemini');
-      setScanOutput(prev => prev + `\nContinuing with Gemini API...\n`);
-
-      // Use exportData.projectId, or show error if missing
-      const projectIdToUse = exportData.projectId;
-      
-      if (!projectIdToUse && provider === 'GCP') {
-        setScanStatus('error');
-        toast({
-          title: "Missing Project ID",
-          description: "No project ID found in export data. Please re-run the export step.",
-          variant: "destructive"
-        });
-        return;
-      }
-      
-      await api.continueScan({
-        exportDir: exportData.exportPath,
-        provider: provider!,
-        projectId: projectIdToUse,
-        geminiApiKey: geminiApiKey
-      });
-    } catch (error) {
-      setScanStatus('error');
-      toast({
-        title: "Failed to Continue Scan",
-        description: "Failed to continue with Gemini analysis. Make sure the backend server is running.",
-        variant: "destructive"
-      });
-    }
-  };
-
-  const rerunSecurityScan = async () => {
-    try {
-      setScanStatus('running');
-      setScanProgress(50); // Skip Prowler, go straight to Gemini
-      setScanOutput('Re-running security scan with existing export data...\n');
-      setCurrentPhase('gemini');
-      setScanResults(null);
-
-      // Use the stored Gemini API key if available, otherwise prompt for it
       if (geminiApiKey.trim()) {
         const projectIdToUse = exportData.projectId || (provider === 'GCP' ? 'inbound-entity-461511-j4' : undefined);
         
@@ -259,17 +227,45 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
           geminiApiKey: geminiApiKey
         });
       } else {
-        // Need to get Gemini API key first
-        setScanStatus('waiting_vertex_id');
-        setScanOutput(prev => prev + '\nGemini API key required for AI analysis...\n');
+        toast({
+          title: "API Key Required",
+          description: "Please enter your Gemini API key.",
+          variant: "destructive"
+        });
       }
     } catch (error) {
       setScanStatus('error');
       toast({
-        title: "Scan Failed to Start",
-        description: "Failed to restart security scan. Make sure the backend server is running.",
+        title: "Scan Failed",
+        description: "Failed to continue scan with Gemini analysis.",
         variant: "destructive"
       });
+    }
+  };
+
+  const rerunSecurityScan = async () => {
+    // Skip API call for AWS
+    if (provider === 'AWS') {
+      toast({
+        title: "AWS Scanning Not Available",
+        description: "AWS security scanning is not yet implemented.", 
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    if (geminiApiKey.trim()) {
+      const projectIdToUse = exportData.projectId || (provider === 'GCP' ? 'inbound-entity-461511-j4' : undefined);
+      
+      await api.continueScan({
+        exportDir: exportData.exportPath,
+        provider: provider!,
+        projectId: projectIdToUse,
+        geminiApiKey: geminiApiKey
+      });
+    } else {
+      // Need to get Gemini API key first
+      setScanStatus('waiting_vertex_id');
     }
   };
 
@@ -391,7 +387,7 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
                 </p>
               </div>
               <Button 
-                onClick={continueWithGeminiAPI}
+                onClick={continueWithGemini}
                 disabled={!geminiApiKey.trim()}
                 className="w-full bg-blue-600 hover:bg-blue-700"
               >
@@ -468,25 +464,6 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center p-3 bg-red-50 rounded-lg">
-                  <div className="text-2xl font-bold text-red-600">{scanResults.summary.critical}</div>
-                  <div className="text-sm text-red-600">Critical</div>
-                </div>
-                <div className="text-center p-3 bg-orange-50 rounded-lg">
-                  <div className="text-2xl font-bold text-orange-600">{scanResults.summary.high}</div>
-                  <div className="text-sm text-orange-600">High</div>
-                </div>
-                <div className="text-center p-3 bg-yellow-50 rounded-lg">
-                  <div className="text-2xl font-bold text-yellow-600">{scanResults.summary.medium}</div>
-                  <div className="text-sm text-yellow-600">Medium</div>
-                </div>
-                <div className="text-center p-3 bg-blue-50 rounded-lg">
-                  <div className="text-2xl font-bold text-blue-600">{scanResults.summary.low}</div>
-                  <div className="text-sm text-blue-600">Low</div>
-                </div>
-              </div>
-              
               <div className="pt-4 border-t space-y-3">
                 <Button onClick={handleComplete} className="w-full bg-blue-600 hover:bg-blue-700">
                   View Detailed Results

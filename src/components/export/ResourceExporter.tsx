@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Textarea } from '@/components/ui/textarea';
-import { FileText, Download, RefreshCw, CheckCircle, AlertCircle } from 'lucide-react';
+import { FileText, Download, RefreshCw, CheckCircle, AlertCircle, Clock, ArrowRight, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { api, CloudSecurityWebSocket } from '@/lib/api';
 
@@ -24,15 +24,44 @@ interface ResourceExporterProps {
 }
 
 const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplete }) => {
+  const { toast } = useToast();
+  
   const [projectId, setProjectId] = useState('');
   const [resourceGroup, setResourceGroup] = useState('');
+  const [awsRegion, setAwsRegion] = useState('us-east-1');
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
   const [exportResults, setExportResults] = useState<any>(null);
   const [exportOutput, setExportOutput] = useState<string>('');
-  const { toast } = useToast();
+  const [latestExport, setLatestExport] = useState<any>(null);
+  const [isCheckingLatest, setIsCheckingLatest] = useState(false);
   const [ws] = useState(() => new CloudSecurityWebSocket());
+
+  // Check for latest export when component mounts
+  useEffect(() => {
+    const checkLatestExport = async () => {
+      // Skip API call for AWS since backend doesn't support it yet
+      if (provider === 'AWS') {
+        setIsCheckingLatest(false);
+        return;
+      }
+      
+      try {
+        setIsCheckingLatest(true);
+        const result = await api.checkLatestExport(provider);
+        if (result.hasExport) {
+          setLatestExport(result.export);
+        }
+      } catch (error) {
+        console.error('Failed to check latest export:', error);
+      } finally {
+        setIsCheckingLatest(false);
+      }
+    };
+
+    checkLatestExport();
+  }, [provider]);
 
   useEffect(() => {
     ws.connect();
@@ -126,6 +155,25 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
       return;
     }
 
+    if (provider === 'AWS' && !awsRegion.trim()) {
+      toast({
+        title: "AWS Region Required", 
+        description: "Please select a valid AWS region.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Skip API call for AWS since backend doesn't support it yet
+    if (provider === 'AWS') {
+      toast({
+        title: "AWS Export Not Available",
+        description: "AWS export functionality is not yet implemented.",
+        variant: "destructive"
+      });
+      return;
+    }
+
     try {
       setIsExporting(true);
       setExportStatus('running');
@@ -154,6 +202,32 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
     }
   };
 
+  const handleUseLatestExport = () => {
+    if (latestExport) {
+      const results = {
+        provider: latestExport.provider,
+        projectId: latestExport.projectId,
+        resourceGroup: latestExport.resourceGroup,
+        exportPath: latestExport.exportPath,
+        fileName: latestExport.fileName,
+        fileSize: latestExport.fileSize,
+        timestamp: latestExport.timestamp,
+        success: true,
+        output: `Using existing export from ${latestExport.age}`
+      };
+
+      setExportResults(results);
+      setExportStatus('success');
+      
+      toast({
+        title: "Using Latest Export",
+        description: `Proceeding with export from ${latestExport.age}`,
+      });
+      
+      onComplete(results);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="text-center">
@@ -166,23 +240,85 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
         </p>
       </div>
 
+      {/* Latest Export Available */}
+      {latestExport && exportStatus === 'idle' && (
+        <Card className="max-w-md mx-auto border-blue-200 bg-blue-50">
+          <CardHeader>
+            <CardTitle className="flex items-center space-x-2 text-blue-700">
+              <Clock className="h-5 w-5" />
+              <span>Latest Export Available</span>
+            </CardTitle>
+            <CardDescription className="text-blue-600">
+              Found existing export from {latestExport.age} - use it to skip the 10-minute export process
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <span className="text-gray-600">Provider:</span>
+                <span className="ml-2 font-medium">{latestExport.provider}</span>
+              </div>
+              <div>
+                <span className="text-gray-600">Size:</span>
+                <span className="ml-2 font-medium">{latestExport.fileSize}</span>
+              </div>
+              {latestExport.projectId && (
+                <div className="col-span-2">
+                  <span className="text-gray-600">Project ID:</span>
+                  <span className="ml-2 font-medium">{latestExport.projectId}</span>
+                </div>
+              )}
+              {latestExport.resourceGroup && (
+                <div className="col-span-2">
+                  <span className="text-gray-600">Resource Group:</span>
+                  <span className="ml-2 font-medium">{latestExport.resourceGroup}</span>
+                </div>
+              )}
+            </div>
+            
+            <div className="flex space-x-2">
+              <Button 
+                onClick={handleUseLatestExport}
+                className="flex-1 bg-blue-600 hover:bg-blue-700"
+              >
+                <ArrowRight className="h-4 w-4 mr-2" />
+                Use This Export
+              </Button>
+            </div>
+            
+            <div className="text-center">
+              <p className="text-xs text-gray-500">
+                Or create a new export below
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Configuration Form */}
       <Card className="max-w-md mx-auto">
         <CardHeader>
           <CardTitle className="flex items-center space-x-2">
             <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-              provider === 'GCP' ? 'bg-blue-600' : 'bg-blue-500'
+              provider === 'GCP' ? 'bg-blue-600' : 
+              provider === 'AZURE' ? 'bg-blue-500' : 'bg-orange-500'
             }`}>
               <span className="text-white text-sm font-bold">
-                {provider === 'GCP' ? 'G' : 'Az'}
+                {provider === 'GCP' ? 'G' : 
+                 provider === 'AZURE' ? 'Az' : 'AWS'}
               </span>
             </div>
-            <span>{provider === 'GCP' ? 'GCP Configuration' : 'Azure Configuration'}</span>
+            <span>
+              {provider === 'GCP' ? 'GCP Configuration' : 
+               provider === 'AZURE' ? 'Azure Configuration' : 'AWS Configuration'}
+            </span>
           </CardTitle>
           <CardDescription>
             {provider === 'GCP' 
               ? 'Enter your GCP Project ID to export resources'
-              : 'Enter your Azure Resource Group name to export resources'
+              : provider === 'AZURE'
+              ? 'Enter your Azure Resource Group name to export resources'
+              : 'Select your AWS region to export resources'
             }
           </CardDescription>
         </CardHeader>
@@ -201,7 +337,7 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
                 The GCP project ID containing resources to export
               </p>
             </div>
-          ) : (
+          ) : provider === 'AZURE' ? (
             <div className="space-y-2">
               <Label htmlFor="resourceGroup">Resource Group</Label>
               <Input
@@ -213,6 +349,20 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
               />
               <p className="text-xs text-gray-500">
                 The Azure resource group containing resources to export
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="awsRegion">AWS Region</Label>
+              <Input
+                id="awsRegion"
+                placeholder="us-east-1"
+                value={awsRegion}
+                onChange={(e) => setAwsRegion(e.target.value)}
+                disabled={isExporting}
+              />
+              <p className="text-xs text-gray-500">
+                The AWS region containing resources to export
               </p>
             </div>
           )}

@@ -70,6 +70,15 @@ export const api = {
     return response.json();
   },
 
+  async checkLatestExport(provider: 'GCP' | 'AZURE') {
+    const response = await fetch(`${API_BASE}/check-latest-export`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider })
+    });
+    return response.json();
+  },
+
   async healthCheck() {
     const response = await fetch(`${API_BASE}/health`);
     return response.json();

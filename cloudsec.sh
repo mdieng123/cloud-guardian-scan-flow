@@ -958,36 +958,27 @@ EOF
 function launch_gemini_security_scanner() {
    echo ""
    echo -e "${GREEN}========================================${NC}"
-   echo -e "${GREEN}Launching Gemini Security Scanner${NC}"
+   echo -e "${GREEN}Launching Modern Gemini Security Scanner${NC}"
    echo -e "${GREEN}========================================${NC}"
    echo ""
   
-   # Get GCP Project ID for Vertex AI
-   local vertex_project_id=""
+   # Get API key from environment (set by server from UI)
+   local gemini_api_key="${GOOGLE_API_KEY:-}"
+   if [[ -z "$gemini_api_key" ]]; then
+       echo -e "${RED}✗ GOOGLE_API_KEY environment variable not set${NC}"
+       echo -e "${YELLOW}Please set GOOGLE_API_KEY environment variable with your Gemini API key${NC}"
+       return 1
+   fi
    
-   # In headless mode, use environment variable
-   if [[ "$HEADLESS_MODE" == "true" ]]; then
-       vertex_project_id="${VERTEX_PROJECT_ID:-$PROJECT_ID}"
-       if [[ -z "$vertex_project_id" ]]; then
-           echo -e "${RED}✗ VERTEX_PROJECT_ID environment variable not set for headless mode${NC}"
-           return 1
-       fi
-       echo -e "${GREEN}Using Vertex AI Project ID from environment: ${vertex_project_id}${NC}"
-   else
-       echo -e "${YELLOW}Enter GCP Project ID for Vertex AI capabilities:${NC}"
-       read -p "Project ID: " vertex_project_id
-      
-       # Validate project ID
-       if [[ -z "$vertex_project_id" ]]; then
-           echo -e "${RED}✗ Project ID is required for Vertex AI${NC}"
-           return 1
-       fi
+   # Get project ID
+   local vertex_project_id="${PROJECT_ID}"
+   if [[ -z "$vertex_project_id" ]]; then
+       echo -e "${RED}✗ Project ID is required${NC}"
+       return 1
    fi
   
    echo -e "${GREEN}✓ Using Project: ${vertex_project_id}${NC}"
    echo -e "${GREEN}✓ Terraform Export: ${LAST_EXPORT_DIR}${NC}"
-   echo -e "${YELLOW}DEBUG: LAST_EXPORT_DIR value: '${LAST_EXPORT_DIR}'${NC}"
-   echo -e "${YELLOW}DEBUG: Current working directory: $(pwd)${NC}"
    echo ""
   
    # Check Python3 is installed
@@ -996,231 +987,25 @@ function launch_gemini_security_scanner() {
        return 1
    fi
   
-   # Create temporary Python scanner script
-   local temp_scanner="temp_security_scanner_$$.py"
-  
-   # Write your exact scanner with PROJECT_ID and TERRAFORM_DIR replaced
-   cat > "$temp_scanner" << 'EOF'
-#!/usr/bin/env python3
-"""
-Terraform Security Scanner - Workflows Version
-Using LlamaIndex Workflows for modern event-driven architecture
-"""
-
-import os
-from datetime import datetime
-from llama_index.core.workflow import (
-    Event,
-    StartEvent,
-    StopEvent,
-    Workflow,
-    step,
-)
-from llama_index.core import SimpleDirectoryReader, VectorStoreIndex
-from llama_index.llms.google_genai import GoogleGenAI
-from llama_index.embeddings.google_genai import GoogleGenAIEmbedding
-from llama_index.core.response_synthesizers import get_response_synthesizer
-# No longer need google.auth for embeddings
-
-
-# Configuration
-PROJECT_ID = "__PROJECT_ID__"
-LOCATION = "us-central1"
-TERRAFORM_DIR = "__TERRAFORM_DIR__"
-OUTPUT_FILE = f"security_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-
-
-# Custom events for the workflow
-class RetrieveEvent(Event):
-    """Event containing retrieved nodes from documents"""
-    nodes: list
-    query: str
-
-
-class AnalyzeEvent(Event):
-    """Event containing analysis results"""
-    analysis: str
-
-
-# Setup LLM with Google GenAI using API key (using Flash for 1M token context)
-llm = GoogleGenAI(
-   model="gemini-2.5-flash",  # Changed to Flash for 1M token context window
-   max_tokens=32000,  # Output tokens for response
-   # Will use GOOGLE_API_KEY environment variable automatically
-)
-
-
-# Security Analysis Workflow using LlamaIndex Workflows
-class SecurityAnalysisWorkflow(Workflow):
-    """
-    Event-driven workflow for Terraform security analysis
-    """
-    
-    @step
-    async def retrieve_terraform_docs(self, ev: StartEvent) -> RetrieveEvent:
-        """Step 1: Load all Terraform documents directly (no RAG needed with 1M token context)"""
-        print("DEBUG: Loading Terraform documents directly...")
-        
-        # Load terraform files directly - no indexing needed with 1M token context
-        reader = SimpleDirectoryReader(TERRAFORM_DIR, required_exts=[".txt"])
-        documents = reader.load_data()
-        print(f"DEBUG: Loaded {len(documents)} documents for direct analysis")
-        
-        if not documents:
-            print("ERROR: No Terraform documents found!")
-            return RetrieveEvent(nodes=[], query=ev.query)
-        
-        # Create simple nodes from documents (no vector search needed)
-        from llama_index.core.schema import TextNode
-        nodes = []
-        for doc in documents:
-            node = TextNode(text=doc.text, metadata=doc.metadata)
-            nodes.append(node)
-        
-        print(f"DEBUG: Created {len(nodes)} nodes for direct analysis")
-        return RetrieveEvent(nodes=nodes, query=ev.query)
-    
-    @step
-    async def analyze_security(self, ev: RetrieveEvent) -> AnalyzeEvent:
-        """Step 2: Perform security analysis on all Terraform configurations"""
-        print("DEBUG: Starting comprehensive security analysis...")
-        
-        if not ev.nodes:
-            analysis = "ERROR: No Terraform configurations found for analysis."
-            return AnalyzeEvent(analysis=analysis)
-        
-        # Combine all Terraform content (1M token context can handle it)
-        all_terraform_content = "\n\n=== TERRAFORM CONFIGURATION FILES ===\n\n"
-        for i, node in enumerate(ev.nodes):
-            all_terraform_content += f"--- File {i+1} ---\n{node.text}\n\n"
-        
-        # Prepare comprehensive security analysis prompt
-        security_prompt = f"""You are a cybersecurity expert specializing in Terraform infrastructure security analysis.
-
-CRITICAL INSTRUCTION: Analyze ALL provided Terraform configurations for security vulnerabilities and provide a comprehensive security report. Focus on identifying actual security issues, not just listing configurations.
-
-{all_terraform_content}
-
-USER QUERY: {ev.query}
-
-Provide a professional security assessment report with:
-
-1. **Executive Summary**: Brief overview of security posture and risk level
-2. **Critical Vulnerabilities**: CRITICAL severity issues with detailed explanations  
-3. **High-Risk Issues**: HIGH severity issues with explanations
-4. **Medium/Low Risk Issues**: Other security concerns
-5. **Remediation Steps**: Specific fixes for each vulnerability with code examples
-6. **Configuration Evidence**: Show problematic configuration snippets
-
-Focus on common cloud security issues:
-- Overly permissive firewall rules (0.0.0.0/0 access)
-- Unrestricted API keys or service accounts
-- Missing encryption configurations  
-- Inadequate logging and monitoring
-- Public resource exposure
-- Weak access controls
-- Default network configurations
-- Service account permissions
-
-Structure as a professional security vulnerability assessment with specific findings and actionable remediation steps."""
-
-        # Generate security analysis using LLM (1M token context should handle this easily)
-        try:
-            response = llm.complete(security_prompt)
-            analysis = response.text if hasattr(response, 'text') else str(response)
-        except Exception as e:
-            print(f"ERROR: Security analysis failed: {e}")
-            analysis = f"ERROR: Security analysis failed due to: {str(e)}"
-        
-        print("DEBUG: Security analysis completed")
-        return AnalyzeEvent(analysis=analysis)
-    
-    @step
-    async def finalize_report(self, ev: AnalyzeEvent) -> StopEvent:
-        """Step 3: Finalize and format the security report"""
-        print("DEBUG: Finalizing security report...")
-        
-        # Create final formatted report
-        final_report = f"TERRAFORM SECURITY ANALYSIS\n\n{ev.analysis}"
-        
-        return StopEvent(result=final_report)
-
-
-# Create workflow instance
-workflow = SecurityAnalysisWorkflow(timeout=300, verbose=True)
-
-
-
-
-
-
-# Main execution
-if __name__ == "__main__":
-   if PROJECT_ID == "YOUR_PROJECT_ID":
-       print("ERROR: Update PROJECT_ID!")
-       exit(1)
-  
-   if not os.path.exists(TERRAFORM_DIR) or not any(f.endswith('.txt') for f in os.listdir(TERRAFORM_DIR)):
-       print(f"ERROR: Add terraform .txt files to {TERRAFORM_DIR}")
-       exit(1)
-  
-   print("Running security analysis...")
-
-
-   # Use workflow.run() for event-driven security analysis
-   print("DEBUG: About to run SecurityAnalysisWorkflow")
-   
-   import asyncio
-   
-   async def run_security_analysis():
-       result = await workflow.run(
-           query="Perform a comprehensive security vulnerability analysis of all Terraform configurations. Identify critical security issues, provide severity ratings, and recommend specific fixes."
-       )
-       return result
-   
-   # Run the workflow
-   try:
-       analysis_result = asyncio.run(run_security_analysis())
-       print(f"DEBUG: Workflow completed successfully")
-       print(f"DEBUG: Result type: {type(analysis_result)}")
-       
-       # Extract the analysis text from the workflow result
-       if hasattr(analysis_result, 'result'):
-           analysis = analysis_result.result
-       else:
-           analysis = str(analysis_result)
-       
-       # Save results
-       with open(OUTPUT_FILE, 'w') as f:
-           f.write(analysis)
-       
-       print(f"✅ Analysis saved to: {OUTPUT_FILE}")
-       
-   except Exception as e:
-       print(f"ERROR: Workflow execution failed: {e}")
-       print(f"DEBUG: Error type: {type(e)}")
-       raise
-EOF
-
-
-   # Replace the placeholders - handle macOS vs Linux sed differences
-   if [[ "$OSTYPE" == "darwin"* ]]; then
-       # macOS
-       sed -i '' "s|__PROJECT_ID__|$vertex_project_id|g" "$temp_scanner"
-       sed -i '' "s|__TERRAFORM_DIR__|$LAST_EXPORT_DIR|g" "$temp_scanner"
-   else
-       # Linux
-       sed -i "s|__PROJECT_ID__|$vertex_project_id|g" "$temp_scanner"
-       sed -i "s|__TERRAFORM_DIR__|$LAST_EXPORT_DIR|g" "$temp_scanner"
+   # Check if the modern scanner exists
+   if [[ ! -f "gemini_security_scanner.py" ]]; then
+       echo -e "${RED}✗ Modern Gemini security scanner not found${NC}"
+       echo -e "${YELLOW}Please ensure gemini_security_scanner.py is in the project directory${NC}"
+       return 1
    fi
   
-      # Launch the security scanner
-   echo -e "${YELLOW}Starting Gemini Security Scanner...${NC}"
-   python3 "$temp_scanner"
+   # Launch the modern security scanner with virtual environment
+   echo -e "${YELLOW}Starting Modern Gemini Security Scanner...${NC}"
+   
+   # Run with virtual environment if available
+   if [[ -d "llama_env" ]]; then
+       echo -e "${BLUE}Activating LlamaIndex virtual environment...${NC}"
+       source llama_env/bin/activate && python3 "gemini_security_scanner.py" "$vertex_project_id" "$LAST_EXPORT_DIR" "$gemini_api_key"
+   else
+       echo -e "${YELLOW}⚠ Virtual environment not found, using system Python${NC}"
+       python3 "gemini_security_scanner.py" "$vertex_project_id" "$LAST_EXPORT_DIR" "$gemini_api_key"
+   fi
    local scanner_exit_code=$?
-
-   # Cleanup temp file
-   rm -f "$temp_scanner"
 
    if [[ $scanner_exit_code -eq 0 ]]; then
        echo -e "${GREEN}✓ Gemini Security scan completed successfully!${NC}"

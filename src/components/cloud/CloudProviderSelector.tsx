@@ -2,26 +2,35 @@
 import React, { useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Cloud, CheckCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface CloudProviderSelectorProps {
-  onComplete: (data: { provider: 'GCP' | 'AZURE' }) => void;
+  onComplete: (data: any) => void;
 }
 
 const CloudProviderSelector: React.FC<CloudProviderSelectorProps> = ({ onComplete }) => {
-  const [selectedProvider, setSelectedProvider] = useState<'GCP' | 'AZURE' | null>(null);
+  const [selectedProvider, setSelectedProvider] = useState<'GCP' | 'AZURE' | 'AWS' | null>(null);
   const { toast } = useToast();
 
-  const handleProviderSelect = (provider: 'GCP' | 'AZURE') => {
+  const handleProviderSelect = (provider: 'GCP' | 'AZURE' | 'AWS') => {
     setSelectedProvider(provider);
+  };
+
+  const handleAWSClick = () => {
+    handleProviderSelect('AWS');
   };
 
   const handleContinue = () => {
     if (selectedProvider) {
       toast({
         title: "Cloud Provider Selected",
-        description: `Proceeding with ${selectedProvider === 'GCP' ? 'Google Cloud Platform' : 'Microsoft Azure'}.`,
+        description: `Proceeding with ${
+          selectedProvider === 'GCP' ? 'Google Cloud Platform' : 
+          selectedProvider === 'AZURE' ? 'Microsoft Azure' : 
+          'Amazon Web Services'
+        }.`,
       });
       onComplete({ provider: selectedProvider });
     } else {
@@ -110,6 +119,43 @@ const CloudProviderSelector: React.FC<CloudProviderSelectorProps> = ({ onComplet
               <p>✓ Resource group-based export</p>
               <p>✓ Complete infrastructure mapping</p>
               <p>✓ Non-interactive batch processing</p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* AWS Option */}
+        <Card 
+          className={`cursor-pointer transition-all duration-200 hover:shadow-md ${
+            selectedProvider === 'AWS' 
+              ? 'ring-2 ring-blue-500 bg-blue-50' 
+              : 'hover:bg-gray-50'
+          }`}
+          onClick={handleAWSClick}
+        >
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 bg-orange-500 rounded-lg flex items-center justify-center">
+                  <span className="text-white font-bold">AWS</span>
+                </div>
+                <div>
+                  <CardTitle className="text-lg">
+                    <span>Amazon Web Services</span>
+                  </CardTitle>
+                  <CardDescription>Export AWS resources using AWS Config</CardDescription>
+                </div>
+              </div>
+              {selectedProvider === 'AWS' && (
+                <CheckCircle className="h-6 w-6 text-blue-600" />
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 text-sm text-gray-600">
+              <p>✓ Terraform export via AWS Config</p>
+              <p>✓ CloudFormation resource discovery</p>
+              <p>✓ Multi-region resource mapping</p>
+              <p>✓ Integration with AWS Security Hub</p>
             </div>
           </CardContent>
         </Card>

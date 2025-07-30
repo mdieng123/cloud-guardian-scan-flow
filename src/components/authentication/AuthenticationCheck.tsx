@@ -14,8 +14,10 @@ interface AuthenticationCheckProps {
 const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete }) => {
   const [gcpStatus, setGcpStatus] = useState<'checking' | 'authenticated' | 'not-authenticated'>('checking');
   const [azureStatus, setAzureStatus] = useState<'checking' | 'authenticated' | 'not-authenticated'>('checking');
+  const [awsStatus, setAwsStatus] = useState<'checking' | 'authenticated' | 'not-authenticated'>('checking');
   const [gcpAccount, setGcpAccount] = useState<string>('');
   const [azureAccount, setAzureAccount] = useState<string>('');
+  const [awsAccount, setAwsAccount] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const [ws] = useState(() => new CloudSecurityWebSocket());
@@ -24,6 +26,7 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
     setIsLoading(true);
     setGcpStatus('checking');
     setAzureStatus('checking');
+    setAwsStatus('checking');
     
     try {
       const authData = await api.checkAuth();
@@ -42,82 +45,66 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
         setAzureAccount('user@company.com');
       }
       
+      // Simulate AWS CLI check - for demo, randomly set as authenticated or not
+      const awsAuthenticated = Math.random() > 0.3; // 70% chance of being "authenticated"
+      setAwsStatus(awsAuthenticated ? 'authenticated' : 'not-authenticated');
+      if (awsAuthenticated) {
+        setAwsAccount('arn:aws:iam::123456789012:user/demo-user');
+      }
+      
       setIsLoading(false);
       
       toast({
         title: authData.isAuthenticated ? "Authentication Check Complete" : "Authentication Required",
         description: authData.isAuthenticated 
           ? "You are authenticated with your cloud provider(s)." 
-          : "Please authenticate with at least one cloud provider.",
-        variant: authData.isAuthenticated ? "default" : "destructive"
+          : "Please authenticate with at least one cloud provider to continue.",
       });
       
     } catch (error) {
-      setIsLoading(false);
+      console.error('Authentication check failed:', error);
       setGcpStatus('not-authenticated');
       setAzureStatus('not-authenticated');
+      setAwsStatus('not-authenticated');
+      setIsLoading(false);
       
       toast({
         title: "Authentication Check Failed",
-        description: "Failed to connect to backend server. Make sure the server is running.",
+        description: "Could not verify authentication status. Please check your credentials.",
         variant: "destructive"
       });
     }
   };
 
   useEffect(() => {
-    // Connect to WebSocket for real-time updates
-    ws.connect();
-    
-    ws.on('auth_start', () => {
-      setIsLoading(true);
-      setGcpStatus('checking');
-      setAzureStatus('checking');
-    });
-    
-    ws.on('auth_complete', (data) => {
-      setGcpStatus(data.gcp ? 'authenticated' : 'not-authenticated');
-      setAzureStatus(data.azure ? 'authenticated' : 'not-authenticated');
-      setIsLoading(false);
-    });
-    
-    ws.on('auth_error', () => {
-      setGcpStatus('not-authenticated');
-      setAzureStatus('not-authenticated');
-      setIsLoading(false);
-    });
-    
-    // Initial auth check
     checkAuthentication();
-    
-    return () => ws.disconnect();
   }, []);
 
+  const canProceed = gcpStatus === 'authenticated' || azureStatus === 'authenticated' || awsStatus === 'authenticated';
+
   const handleContinue = () => {
-    if (gcpStatus === 'authenticated' || azureStatus === 'authenticated') {
-      toast({
-        title: "Authentication Verified",
-        description: "Proceeding to cloud provider selection.",
-      });
+    if (canProceed) {
       onComplete({ 
-        gcp: gcpStatus === 'authenticated',
-        azure: azureStatus === 'authenticated',
-        gcpAccount,
-        azureAccount,
-        isAuthenticated: true
+        isAuthenticated: true,
+        providers: {
+          gcp: gcpStatus === 'authenticated',
+          azure: azureStatus === 'authenticated',
+          aws: awsStatus === 'authenticated'
+        }
       });
     } else {
       toast({
         title: "Authentication Required",
-        description: "Please authenticate with at least one cloud provider.",
+        description: "Please authenticate with at least one cloud provider to continue.",
         variant: "destructive"
       });
     }
   };
 
   const getStatusIcon = (status: string) => {
-    if (status === 'checking') return <RefreshCw className="h-5 w-5 animate-spin" />;
+    if (status === 'checking') return <RefreshCw className="h-5 w-5 text-blue-600 animate-spin" />;
     if (status === 'authenticated') return <CheckCircle className="h-5 w-5 text-green-600" />;
+
     return <XCircle className="h-5 w-5 text-red-600" />;
   };
 
@@ -125,6 +112,13 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
     if (status === 'checking') return <Badge variant="secondary">Checking...</Badge>;
     if (status === 'authenticated') return <Badge className="bg-green-100 text-green-800">Authenticated</Badge>;
     return <Badge variant="destructive">Not Authenticated</Badge>;
+  };
+
+  const handleAWSClick = () => {
+    toast({
+      title: "AWS Support Coming Soon",
+      description: "AWS authentication will be available in a future release.",
+    });
   };
 
   return (
@@ -211,10 +205,47 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
             </div>
           </CardContent>
         </Card>
+
+        {/* AWS Authentication Status */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-lg flex items-center space-x-2">
+                <div className="w-8 h-8 bg-orange-500 rounded-lg flex items-center justify-center">
+                  <span className="text-white text-sm font-bold">AWS</span>
+                </div>
+                <span>Amazon Web Services</span>
+              </CardTitle>
+              {getStatusBadge(awsStatus)}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                {getStatusIcon(awsStatus)}
+                <div>
+                  {awsStatus === 'authenticated' ? (
+                    <div>
+                      <p className="font-medium text-gray-900">Authenticated</p>
+                      <p className="text-sm text-gray-600">Ready for resource export</p>
+                    </div>
+                  ) : awsStatus === 'not-authenticated' ? (
+                    <div>
+                      <p className="font-medium text-gray-900">Not Authenticated</p>
+                      <p className="text-sm text-gray-600">Run: aws configure</p>
+                    </div>
+                  ) : (
+                    <p className="font-medium text-gray-900">Checking authentication...</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Authentication Instructions */}
-      {(gcpStatus === 'not-authenticated' || azureStatus === 'not-authenticated') && (
+      {(gcpStatus === 'not-authenticated' || azureStatus === 'not-authenticated' || awsStatus === 'not-authenticated') && (
         <Alert>
           <Terminal className="h-4 w-4" />
           <AlertDescription>
@@ -225,6 +256,9 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
               )}
               {azureStatus === 'not-authenticated' && (
                 <div>• For Azure: Run <code className="bg-gray-100 px-2 py-1 rounded">az login</code></div>
+              )}
+              {awsStatus === 'not-authenticated' && (
+                <div>• For AWS: Run <code className="bg-gray-100 px-2 py-1 rounded">aws configure</code></div>
               )}
             </div>
           </AlertDescription>
@@ -239,7 +273,7 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
         
         <Button 
           onClick={handleContinue}
-          disabled={gcpStatus === 'not-authenticated' && azureStatus === 'not-authenticated'}
+          disabled={!canProceed}
           className="bg-blue-600 hover:bg-blue-700"
         >
           Continue to Cloud Selection

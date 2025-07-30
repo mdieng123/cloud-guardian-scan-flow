@@ -11,7 +11,7 @@ import ResourceExporter from '@/components/export/ResourceExporter';
 import SecurityScanner from '@/components/security/SecurityScanner';
 import ResultsViewer from '@/components/results/ResultsViewer';
 
-export type CloudProvider = 'GCP' | 'AZURE' | null;
+export type CloudProvider = 'GCP' | 'AZURE' | 'AWS' | null;
 export type WorkflowStep = 'auth' | 'provider' | 'export' | 'scan' | 'results';
 
 const Index = () => {
