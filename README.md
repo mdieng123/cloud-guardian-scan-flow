@@ -7,15 +7,15 @@ A comprehensive cloud security assessment tool that combines Terraform export ca
 **New to the project? Run this single command:**
 
 ```bash
-./setup.sh
+./start.sh
 ```
 
-This will install all dependencies, set up virtual environments, and configure everything for you!
+This will automatically install all dependencies, set up virtual environments, configure everything, and start the application!
 
 ## ✨ Features
 
 - **🔄 Use Latest Export**: Skip 10-minute exports by reusing recent ones
-- **🌐 Multi-Cloud Support**: Export resources from GCP and Azure to Terraform format
+- **🌐 Multi-Cloud Support**: Export resources from AWS, GCP, and Azure to Terraform format
 - **🤖 Modern AI Analysis**: Advanced security analysis using Google Gemini 2.0 Flash with LlamaIndex RAG
 - **🛡️ Prowler Integration**: Industry-standard security scanning with Prowler
 - **⚡ Real-time UI**: Modern React interface with real-time progress updates
@@ -29,25 +29,35 @@ The setup script will install most of these automatically, but you may need:
 - **System**: macOS or Linux
 - **Node.js**: 18+ (auto-installed)
 - **Python**: 3.13+ (auto-installed)
-- **Cloud CLIs**: gcloud, az (auto-installed)
+- **Cloud CLIs**: gcloud, az, aws (auto-installed)
+- **Terraform**: Latest version (auto-installed)
 
 ## ⚡ Installation & Setup
 
-### Option 1: Automated Setup (Recommended)
+### Option 1: Automated Setup & Start (Recommended)
 ```bash
 # Clone the repository
 git clone <repository-url>
 cd cloud-guardian-scan-flow
 
-# Run the complete setup (installs everything)
-./setup.sh
+# Run the complete setup and start (installs everything and starts the app)
+./start.sh
 
 # Follow the instructions to configure API keys
 cp .env .env.local
 # Edit .env.local with your Gemini API key
 ```
 
-### Option 2: Manual Setup
+### Option 2: Setup Only (No Auto-Start)
+```bash
+# Run setup without starting the application
+./setup.sh
+
+# Start manually when ready
+npm run dev
+```
+
+### Option 3: Manual Setup
 ```bash
 # Install Node.js dependencies
 npm install
@@ -58,12 +68,6 @@ npm run python:setup
 # Create configuration
 cp .env .env.local
 # Edit .env.local with your settings
-```
-
-### Option 3: Quick Setup (Skip System Dependencies)
-```bash
-# If you already have system tools installed
-npm run setup:quick
 ```
 
 ## 🎯 Usage
@@ -79,7 +83,7 @@ npm run setup:quick
 
 3. **Follow the workflow:**
    - ✅ Check cloud authentication
-   - 📤 Select cloud provider (GCP/Azure)
+   - 📤 Select cloud provider (AWS/GCP/Azure)
    - ⚡ **Use Latest Export** (skip 10-min wait!) or create new export
    - 🔑 Enter your Gemini API key
    - 🔍 Run security analysis
@@ -108,6 +112,24 @@ npm run scan:test
 # Authenticate with cloud providers
 npm run auth:gcp     # or: gcloud auth login
 npm run auth:azure   # or: az login
+npm run auth:aws     # or: aws configure (or ./setup_aws.sh)
+```
+
+### AWS-Specific Setup
+```bash
+# Option 1: Quick AWS setup script
+./setup_aws.sh
+
+# Option 2: Manual AWS CLI configuration
+aws configure
+
+# Option 3: Use existing AWS credentials
+# Ensure ~/.aws/credentials exists with access keys
+
+# Import specific AWS resources (examples)
+./aws_import.sh --vpc-ids vpc-123,vpc-456 --regions us-east-1
+./aws_import.sh --resources vpc,subnet,instance --regions us-west-2
+./aws_import.sh --help  # See all options
 ```
 
 ## 🛠️ Available Commands
@@ -146,12 +168,15 @@ npm run clean          # Clean install everything
 - **Backend**: Node.js + Express + WebSocket
 - **AI Analysis**: Python + LlamaIndex + Google Gemini 2.0 Flash
 - **Security Scanning**: Prowler
-- **Cloud Export**: gcloud/az CLI tools
+- **Cloud Export**: Terraform + Terraformer (AWS), gcloud/az CLI tools (GCP/Azure)
+- **Vector Store**: ChromaDB for provider-specific data isolation
 
 ### Modern Features (2025)
 - ✅ **Non-deprecated LlamaIndex APIs**: Future-proof implementation
 - ✅ **RAG Pipeline**: Advanced document analysis with vector embeddings
 - ✅ **Latest Export Reuse**: Skip lengthy exports when possible
+- ✅ **Provider Isolation**: Separate ChromaDB collections prevent data contamination
+- ✅ **AWS Terraformer Integration**: Reverse Terraform for existing AWS infrastructure
 - ✅ **Lazy Initialization**: Better performance and testing
 - ✅ **Comprehensive Testing**: Automated verification of all components
 
@@ -166,6 +191,8 @@ cloud-guardian-scan-flow/
 ├── 📁 llama_env/                   # Python virtual environment
 ├── 🐍 gemini_security_scanner.py   # Modern AI scanner
 ├── 🔧 cloudsec.sh                  # Main security script
+├── 🔗 aws_import.sh                # AWS resource import script
+├── 📁 tftest/                      # Terraform workspace for AWS imports
 ├── 📦 requirements.txt             # Python dependencies
 ├── ⚡ setup.sh                     # Automated setup script
 └── 📚 README.md                    # This file
@@ -185,6 +212,7 @@ npm run deps:check
 # Verify cloud authentication
 gcloud auth list
 az account show
+aws sts get-caller-identity
 ```
 
 ## 🔒 Security Considerations
@@ -225,10 +253,12 @@ ls -la *_export_*
 
 ## 🚀 Recent Updates
 
+- ✅ **AWS Support Added**: Full AWS integration with Terraformer and Terraform
+- ✅ **Provider Isolation**: ChromaDB collections isolated per cloud provider (AWS/GCP/Azure)
 - ✅ **Modern LlamaIndex**: Upgraded to 2025 non-deprecated APIs
 - ✅ **Latest Export Feature**: Skip 10-minute waits by reusing exports
 - ✅ **Automated Setup**: Complete environment setup with one command
-- ✅ **Comprehensive Testing**: Full test suite for reliability
+- ✅ **Enhanced Security**: Fixed cross-provider data contamination issues
 
 ## 🤝 Contributing
 
