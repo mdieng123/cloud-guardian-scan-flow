@@ -156,22 +156,24 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
   }, [currentPhase, provider, exportData, toast]);
 
   const startSecurityScan = async () => {
-    // Skip API call for AWS
-    if (provider === 'AWS') {
-      toast({
-        title: "AWS Scanning Not Available",
-        description: "AWS security scanning is not yet implemented.",
-        variant: "destructive"
-      });
-      return;
-    }
+    // AWS is now supported
+    // if (provider === 'AWS') {
+    //   toast({
+    //     title: "AWS Scanning Not Available",
+    //     description: "AWS security scanning is not yet implemented.",
+    //     variant: "destructive"
+    //   });
+    //   return;
+    // }
     
     try {
       setScanStatus('running');
       setScanProgress(0);
       setScanOutput('Starting security scan...\n');
       
-      const projectIdToUse = exportData.projectId || (provider === 'GCP' ? 'inbound-entity-461511-j4' : undefined);
+      const projectIdToUse = exportData.projectId || 
+                         (provider === 'GCP' ? 'inbound-entity-461511-j4' : 
+                          provider === 'AWS' ? 'aws-security-scan' : undefined);
       
       if (provider === 'GCP' && !projectIdToUse) {
         toast({
@@ -206,15 +208,15 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
   };
 
   const continueWithGemini = async () => {
-    // Skip API call for AWS
-    if (provider === 'AWS') {
-      toast({
-        title: "AWS Scanning Not Available", 
-        description: "AWS security scanning is not yet implemented.",
-        variant: "destructive"
-      });
-      return;
-    }
+    // AWS is now supported
+    // if (provider === 'AWS') {
+    //   toast({
+    //     title: "AWS Scanning Not Available", 
+    //     description: "AWS security scanning is not yet implemented.",
+    //     variant: "destructive"
+    //   });
+    //   return;
+    // }
     
     try {
       if (geminiApiKey.trim()) {
@@ -224,7 +226,9 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
         setScanProgress(50); // Start from 50% since Prowler is done
         setScanOutput(prev => prev + '\n🧠 Starting Gemini AI security analysis...\n');
         
-        const projectIdToUse = exportData.projectId || (provider === 'GCP' ? 'inbound-entity-461511-j4' : undefined);
+        const projectIdToUse = exportData.projectId || 
+                           (provider === 'GCP' ? 'inbound-entity-461511-j4' : 
+                            provider === 'AWS' ? 'aws-security-scan' : undefined);
         
         await api.continueScan({
           exportDir: exportData.exportPath,
@@ -250,18 +254,20 @@ const SecurityScanner: React.FC<SecurityScannerProps> = ({ exportData, provider,
   };
 
   const rerunSecurityScan = async () => {
-    // Skip API call for AWS
-    if (provider === 'AWS') {
-      toast({
-        title: "AWS Scanning Not Available",
-        description: "AWS security scanning is not yet implemented.", 
-        variant: "destructive"
-      });
-      return;
-    }
+    // AWS is now supported
+    // if (provider === 'AWS') {
+    //   toast({
+    //     title: "AWS Scanning Not Available",
+    //     description: "AWS security scanning is not yet implemented.", 
+    //     variant: "destructive"
+    //   });
+    //   return;
+    // }
     
     if (geminiApiKey.trim()) {
-      const projectIdToUse = exportData.projectId || (provider === 'GCP' ? 'inbound-entity-461511-j4' : undefined);
+      const projectIdToUse = exportData.projectId || 
+                         (provider === 'GCP' ? 'inbound-entity-461511-j4' : 
+                          provider === 'AWS' ? 'aws-security-scan' : undefined);
       
       await api.continueScan({
         exportDir: exportData.exportPath,

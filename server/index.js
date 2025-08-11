@@ -1,11 +1,13 @@
 import express from 'express';
 import cors from 'cors';
+import multer from 'multer';
 import { WebSocketServer } from 'ws';
 import { spawn } from 'child_process';
 import { createServer } from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { glob } from 'glob';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,7 +19,13 @@ const wss = new WebSocketServer({ server });
 app.use(cors());
 app.use(express.json());
 
-// File upload will be implemented later
+// Configure multer for file uploads
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  }
+});
 
 // Store active connections
 const connections = new Map();
@@ -51,6 +59,7 @@ app.post('/api/check-auth', async (req, res) => {
     
     let gcpAuthenticated = false;
     let azureAuthenticated = false;
+    let awsAuthenticated = false;
     
     // Check gcloud auth with error handling
     try {
@@ -98,10 +107,83 @@ app.post('/api/check-auth', async (req, res) => {
       azureAuthenticated = false;
     }
     
+    // Check AWS CLI and auth with better error handling
+    try {
+      // First check if AWS CLI is installed
+      const awsVersionCheck = spawn('aws', ['--version'], { 
+        stdio: 'pipe',
+        env: {
+          ...process.env,
+          HOME: process.env.HOME,
+        }
+      });
+      
+      let awsCliInstalled = false;
+      
+      await new Promise((resolve) => {
+        awsVersionCheck.on('close', (code) => {
+          awsCliInstalled = code === 0;
+          resolve();
+        });
+        awsVersionCheck.on('error', () => {
+          awsCliInstalled = false;
+          resolve();
+        });
+      });
+      
+      if (!awsCliInstalled) {
+        console.log('AWS CLI not installed');
+        awsAuthenticated = false;
+      } else {
+        // AWS CLI is installed, now check credentials
+        const awsCheck = spawn('aws', ['sts', 'get-caller-identity'], { 
+          stdio: 'pipe',
+          timeout: 10000, // 10 second timeout
+          env: {
+            ...process.env,
+            HOME: process.env.HOME,
+            AWS_CONFIG_FILE: process.env.AWS_CONFIG_FILE || path.join(process.env.HOME || '/tmp', '.aws', 'config'),
+            AWS_SHARED_CREDENTIALS_FILE: process.env.AWS_SHARED_CREDENTIALS_FILE || path.join(process.env.HOME || '/tmp', '.aws', 'credentials')
+          }
+        });
+        
+        await new Promise((resolve) => {
+          const timeout = setTimeout(() => {
+            awsCheck.kill();
+            awsAuthenticated = false;
+            console.log('AWS authentication check timed out');
+            resolve();
+          }, 10000);
+          
+          awsCheck.on('close', (code) => {
+            clearTimeout(timeout);
+            awsAuthenticated = code === 0;
+            if (code === 0) {
+              console.log('AWS authentication successful');
+            } else {
+              console.log('AWS authentication failed with code:', code);
+            }
+            resolve();
+          });
+          
+          awsCheck.on('error', (error) => {
+            clearTimeout(timeout);
+            console.log('AWS auth check error:', error.message);
+            awsAuthenticated = false;
+            resolve();
+          });
+        });
+      }
+    } catch (error) {
+      console.log('AWS CLI check failed:', error.message);
+      awsAuthenticated = false;
+    }
+    
     const authStatus = {
       gcp: gcpAuthenticated,
       azure: azureAuthenticated,
-      isAuthenticated: gcpAuthenticated || azureAuthenticated
+      aws: awsAuthenticated,
+      isAuthenticated: gcpAuthenticated || azureAuthenticated || awsAuthenticated
     };
     
     broadcast({ type: 'auth_complete', data: authStatus });
@@ -114,11 +196,144 @@ app.post('/api/check-auth', async (req, res) => {
 
 // Export resources endpoint
 app.post('/api/export', async (req, res) => {
-  const { provider, projectId, resourceGroup } = req.body;
+  const { provider, projectId, resourceGroup, awsRegion, awsResources, vpcIds } = req.body;
   
   try {
     broadcast({ type: 'export_start', data: { provider }, provider });
     
+    // Handle AWS export differently
+    if (provider === 'AWS') {
+      // Read AWS credentials from file if not in environment
+      let awsCredentials = {};
+      try {
+        const credentialsPath = path.join(process.env.HOME || '/tmp', '.aws', 'credentials');
+        if (fs.existsSync(credentialsPath)) {
+          const credentialsContent = fs.readFileSync(credentialsPath, 'utf-8');
+          const lines = credentialsContent.split('\n');
+          let currentProfile = null;
+          
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+              currentProfile = trimmed.slice(1, -1);
+            } else if (currentProfile === 'default' || currentProfile === (process.env.AWS_PROFILE || 'default')) {
+              if (trimmed.startsWith('aws_access_key_id')) {
+                awsCredentials.AWS_ACCESS_KEY_ID = trimmed.split('=')[1].trim();
+              } else if (trimmed.startsWith('aws_secret_access_key')) {
+                awsCredentials.AWS_SECRET_ACCESS_KEY = trimmed.split('=')[1].trim();
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.log('Could not read AWS credentials file:', error.message);
+      }
+      
+      // Use our custom AWS import script
+      const awsScriptPath = path.join(__dirname, '..', 'aws_import.sh');
+      
+      // Build AWS import command arguments
+      let awsArgs = ['--regions', awsRegion || 'us-east-1'];
+      
+      if (awsResources && awsResources.trim()) {
+        awsArgs.push('--resources', awsResources);
+      }
+      
+      if (vpcIds && vpcIds.trim()) {
+        awsArgs.push('--vpc-ids', vpcIds);
+      }
+      
+      awsArgs.push('--output-dir', './tftest');
+      
+      console.log('Starting AWS import with args:', awsArgs);
+      console.log('AWS credentials loaded from file:', Object.keys(awsCredentials));
+      
+      const bashScript = spawn('bash', [awsScriptPath, ...awsArgs], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: path.join(__dirname, '..'),
+        env: {
+          ...process.env,
+          PATH: process.env.PATH,
+          // Use credentials from file or environment
+          AWS_ACCESS_KEY_ID: awsCredentials.AWS_ACCESS_KEY_ID || process.env.AWS_ACCESS_KEY_ID,
+          AWS_SECRET_ACCESS_KEY: awsCredentials.AWS_SECRET_ACCESS_KEY || process.env.AWS_SECRET_ACCESS_KEY,
+          AWS_SESSION_TOKEN: process.env.AWS_SESSION_TOKEN,
+          AWS_DEFAULT_REGION: (awsRegion || process.env.AWS_DEFAULT_REGION || 'us-east-1').replace('us-east1', 'us-east-1'),
+          AWS_REGION: (awsRegion || process.env.AWS_REGION || 'us-east-1').replace('us-east1', 'us-east-1'),
+          AWS_PROFILE: process.env.AWS_PROFILE || 'default',
+          // Pass through HOME directory for AWS config files
+          HOME: process.env.HOME,
+          AWS_CONFIG_FILE: process.env.AWS_CONFIG_FILE || path.join(process.env.HOME || '/tmp', '.aws', 'config'),
+          AWS_SHARED_CREDENTIALS_FILE: process.env.AWS_SHARED_CREDENTIALS_FILE || path.join(process.env.HOME || '/tmp', '.aws', 'credentials'),
+          // Additional environment variables for Prowler
+          CLOUD_PROVIDER: 'AWS'
+        }
+      });
+      
+      let output = '';
+      let exportSuccess = false;
+      let exportDir = './tftest';
+      let exportFile = 'generated/aws_consolidated.txt';
+      
+      bashScript.stdout.on('data', (data) => {
+        const text = data.toString();
+        output += text;
+        
+        console.log('AWS Script output:', text);
+        
+        // Check for success indicators
+        if (text.includes('Terraformer import completed successfully')) {
+          exportSuccess = true;
+        }
+        
+        if (text.includes('Consolidated file created:')) {
+          const match = text.match(/Consolidated file created: (.+)/);
+          if (match) {
+            exportFile = match[1].trim();
+          }
+        }
+        
+        broadcast({ type: 'export_progress', data: text });
+      });
+      
+      bashScript.stderr.on('data', (data) => {
+        const errorText = data.toString();
+        output += errorText;
+        broadcast({ type: 'export_error', data: errorText });
+      });
+      
+      bashScript.on('close', (code) => {
+        const result = {
+          success: exportSuccess && code === 0,
+          output,
+          exportDir,
+          exportFile,
+          provider,
+          exitCode: code
+        };
+        
+        broadcast({ type: 'export_complete', data: result });
+        res.json(result);
+      });
+      
+      bashScript.on('error', (error) => {
+        const errorResult = {
+          success: false,
+          output: `AWS import script execution error: ${error.message}`,
+          exportDir: '',
+          exportFile: '',
+          provider,
+          exitCode: -1
+        };
+        
+        broadcast({ type: 'export_error', data: error.message });
+        res.status(500).json(errorResult);
+      });
+      
+      return; // Exit early for AWS
+    }
+    
+    // Handle GCP and Azure with existing logic
     const scriptPath = path.join(__dirname, '..', 'cloudsec.sh');
     
     const bashScript = spawn('bash', [scriptPath], { 
@@ -270,7 +485,7 @@ app.post('/api/scan', async (req, res) => {
       export CLOUD_PROVIDER="${provider}"
       export PROJECT_ID="${projectId || ''}"
       export LAST_EXPORT_DIR="${exportDir}"
-      export LAST_EXPORT_FILE="${provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt'}"
+      export LAST_EXPORT_FILE="${provider === 'GCP' ? 'gcp_resources.txt' : provider === 'AWS' ? 'generated/aws_consolidated.txt' : 'azure_resources.txt'}"
       export HEADLESS_MODE="true"
       
       echo "Starting security assessment..."
@@ -420,8 +635,8 @@ app.get('/api/download-final-report', async (req, res) => {
     const searchDir = path.join(__dirname, '..');
     console.log('Searching in directory:', searchDir);
     
-    // Find the most recent final security report
-    const reportFiles = glob.sync('final_security_report_*.md', { 
+    // Find the most recent final security report using async glob
+    const reportFiles = await glob('final_security_report_*.md', { 
       cwd: searchDir,
       absolute: true 
     });
@@ -482,8 +697,8 @@ app.get('/api/download-final-report', async (req, res) => {
   }
 });
 
-// Upload document for RAG knowledge base (temporarily disabled)
-app.post('/api/upload-document', async (req, res) => {
+// Upload document for RAG knowledge base
+app.post('/api/upload-document', upload.single('document'), async (req, res) => {
   try {
     const { geminiApiKey } = req.body;
     const file = req.file;
@@ -654,9 +869,9 @@ if __name__ == "__main__":
     const scriptPath = path.join(__dirname, '..', 'temp_chat_script.py');
     fs.writeFileSync(scriptPath, chatScript);
 
-    // Run the chat script
-    const { spawn } = require('child_process');
-    const pythonProcess = spawn('python3', [scriptPath, message, geminiApiKey], {
+    // Run the chat script using virtual environment
+    // spawn is already imported at the top
+    const pythonProcess = spawn('bash', ['-c', `source llama_env/bin/activate && python3 "${scriptPath}" "${message}" "${geminiApiKey}"`], {
       cwd: path.join(__dirname, '..')
     });
 
@@ -716,7 +931,7 @@ app.post('/api/continue-scan', async (req, res) => {
       export PROJECT_ID="${projectId || ''}"
       export GOOGLE_API_KEY="${geminiApiKey}"
       export LAST_EXPORT_DIR="${fullExportDir}"
-      export LAST_EXPORT_FILE="${provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt'}"
+      export LAST_EXPORT_FILE="${provider === 'GCP' ? 'gcp_resources.txt' : provider === 'AWS' ? 'generated/aws_consolidated.txt' : 'azure_resources.txt'}"
       export HEADLESS_MODE="true"
       export SKIP_PROWLER="true"
       
@@ -871,7 +1086,20 @@ app.post('/api/check-latest-export', async (req, res) => {
     const { glob } = await import('glob');
     
     // Look for existing export directories
-    const pattern = provider === 'GCP' ? 'gcp_export_*' : 'azure_export_*';
+    let pattern, expectedFile;
+    if (provider === 'GCP') {
+      pattern = 'gcp_export_*';
+      expectedFile = 'gcp_resources.txt';
+    } else if (provider === 'AZURE') {
+      pattern = 'azure_export_*';
+      expectedFile = 'azure_resources.txt';
+    } else if (provider === 'AWS') {
+      pattern = 'tftest';
+      expectedFile = 'generated/aws_consolidated.txt';
+    } else {
+      return res.json({ hasExport: false });
+    }
+    
     const matchedDirs = await glob(pattern, { cwd: path.join(__dirname, '..') });
     
     const exportDirs = matchedDirs
@@ -898,8 +1126,7 @@ app.post('/api/check-latest-export', async (req, res) => {
 
     const latestExport = exportDirs[0];
     
-    // Check if the export has the required files
-    const expectedFile = provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt';
+    // Check if the export has the required files  
     const exportFilePath = path.join(latestExport.path, expectedFile);
     
     if (!fs.existsSync(exportFilePath)) {

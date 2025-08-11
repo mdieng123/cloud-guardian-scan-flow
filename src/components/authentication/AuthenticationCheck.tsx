@@ -45,10 +45,10 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
         setAzureAccount('user@company.com');
       }
       
-      // Simulate AWS CLI check - for demo, randomly set as authenticated or not
-      const awsAuthenticated = Math.random() > 0.3; // 70% chance of being "authenticated"
-      setAwsStatus(awsAuthenticated ? 'authenticated' : 'not-authenticated');
-      if (awsAuthenticated) {
+      // Update AWS status
+      setAwsStatus(authData.aws ? 'authenticated' : 'not-authenticated');
+      if (authData.aws) {
+        // You could get the actual account from aws command output
         setAwsAccount('arn:aws:iam::123456789012:user/demo-user');
       }
       
@@ -114,12 +114,7 @@ const AuthenticationCheck: React.FC<AuthenticationCheckProps> = ({ onComplete })
     return <Badge variant="destructive">Not Authenticated</Badge>;
   };
 
-  const handleAWSClick = () => {
-    toast({
-      title: "AWS Support Coming Soon",
-      description: "AWS authentication will be available in a future release.",
-    });
-  };
+  // AWS is now fully supported
 
   return (
     <div className="space-y-6">

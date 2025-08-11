@@ -33,15 +33,16 @@ class ModernGeminiSecurityScanner:
     Includes specialized vulnerability detection and security knowledge base
     """
     
-    def __init__(self, project_id: str, terraform_dir: str, api_key: str):
+    def __init__(self, project_id: str, terraform_dir: str, api_key: str, provider: str = "AWS"):
         self.project_id = project_id
         self.terraform_dir = Path(terraform_dir)
         self.api_key = api_key
+        self.provider = provider.upper()
         self.output_file = f"enhanced_security_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         
-        # ChromaDB setup
+        # ChromaDB setup with provider-specific collection to prevent cross-contamination
         self.chroma_db_path = "./chroma_security_db"
-        self.collection_name = "security_knowledge_base"
+        self.collection_name = f"security_knowledge_base_{self.provider.lower()}"
         
         # Store configuration for later initialization
         self.llm_config = {
@@ -140,6 +141,60 @@ class ModernGeminiSecurityScanner:
                 "description": "Storage buckets configured without uniform bucket-level access",
                 "impact": "Inconsistent access controls, potential data exposure",
                 "remediation": "Enable uniform bucket-level access and implement consistent IAM policies"
+            },
+            {
+                "category": "AWS EC2 Security",
+                "pattern": "associate_public_ip_address.*=.*true",
+                "vulnerability": "EC2 instances with public IP addresses",
+                "severity": "HIGH",
+                "description": "EC2 instances configured to receive public IP addresses",
+                "impact": "Direct internet exposure, increased attack surface",
+                "remediation": "Use private subnets with NAT gateway, implement bastion hosts for access"
+            },
+            {
+                "category": "AWS Security Group",
+                "pattern": "cidr_blocks.*=.*\\[\"0\\.0\\.0\\.0/0\"\\]",
+                "vulnerability": "Security group with unrestricted access",
+                "severity": "CRITICAL",
+                "description": "Security groups allowing inbound traffic from any IP address",
+                "impact": "Unrestricted network access, potential for unauthorized access",
+                "remediation": "Restrict CIDR blocks to specific IP ranges, implement least privilege access"
+            },
+            {
+                "category": "AWS S3 Bucket",
+                "pattern": "block_public_acls.*=.*false|block_public_policy.*=.*false",
+                "vulnerability": "S3 bucket allowing public access",
+                "severity": "CRITICAL",
+                "description": "S3 buckets not configured to block public access",
+                "impact": "Data exposure, unauthorized data access, compliance violations",
+                "remediation": "Enable all S3 block public access settings, review bucket policies"
+            },
+            {
+                "category": "AWS RDS Security",
+                "pattern": "publicly_accessible.*=.*true",
+                "vulnerability": "RDS instance publicly accessible",
+                "severity": "CRITICAL",
+                "description": "RDS database instances configured as publicly accessible",
+                "impact": "Database exposure to internet, unauthorized data access",
+                "remediation": "Set publicly_accessible = false, use VPC endpoints for access"
+            },
+            {
+                "category": "AWS Lambda Security",
+                "pattern": "reserved_concurrent_executions.*=.*-1",
+                "vulnerability": "Lambda function without concurrency limits",
+                "severity": "MEDIUM",
+                "description": "Lambda functions without reserved concurrency limits",
+                "impact": "Potential for denial of service, unexpected costs",
+                "remediation": "Set appropriate reserved_concurrent_executions limits"
+            },
+            {
+                "category": "AWS IAM Policy",
+                "pattern": "Effect.*=.*Allow.*Action.*=.*\\*.*Resource.*=.*\\*",
+                "vulnerability": "IAM policy with wildcard permissions",
+                "severity": "CRITICAL",
+                "description": "IAM policies granting wildcard permissions on all resources",
+                "impact": "Excessive privileges, potential for privilege escalation",
+                "remediation": "Apply principle of least privilege, specify explicit actions and resources"
             }
         ]
     
@@ -150,13 +205,18 @@ class ModernGeminiSecurityScanner:
         # Create persistent ChromaDB client
         chroma_client = chromadb.PersistentClient(path=self.chroma_db_path)
         
-        # Get or create collection
+        # Get or create provider-specific collection
         try:
             chroma_collection = chroma_client.get_collection(self.collection_name)
-            print(f"📚 Using existing ChromaDB collection: {self.collection_name}")
+            print(f"📚 Using existing ChromaDB collection: {self.collection_name} (Provider: {self.provider})")
         except:
             chroma_collection = chroma_client.create_collection(self.collection_name)
-            print(f"🆕 Created new ChromaDB collection: {self.collection_name}")
+            print(f"🆕 Created new ChromaDB collection: {self.collection_name} (Provider: {self.provider})")
+        
+        # Clear existing documents in the collection to prevent cross-contamination
+        if chroma_collection.count() > 0:
+            print(f"🧹 Clearing existing documents in collection to prevent cross-contamination")
+            chroma_collection.delete()
         
         # Create ChromaDB vector store
         vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
@@ -209,7 +269,7 @@ class ModernGeminiSecurityScanner:
         if not self.terraform_dir.exists():
             raise FileNotFoundError(f"Terraform directory not found: {self.terraform_dir}")
         
-        # Load documents with proper extensions  
+        # Load documents with proper extensions, including AWS consolidated files
         reader = SimpleDirectoryReader(
             input_dir=str(self.terraform_dir),
             required_exts=[".txt", ".tf"],
@@ -224,9 +284,10 @@ class ModernGeminiSecurityScanner:
         # Enhance documents with metadata
         enhanced_docs = []
         for doc in documents:
-            # Add metadata for better retrieval
+            # Add metadata for better retrieval including provider isolation
             doc.metadata.update({
                 "project_id": self.project_id,
+                "provider": self.provider,
                 "doc_type": "terraform_config",
                 "analysis_date": datetime.now().isoformat()
             })
@@ -287,14 +348,27 @@ class ModernGeminiSecurityScanner:
 Analyze the provided Terraform configurations for security vulnerabilities. Pay special attention to these CRITICAL vulnerability patterns identified in similar configurations:
 
 🚨 **CRITICAL PATTERNS TO DETECT:**
+
+**GCP-Specific Patterns:**
 1. **Public Access**: `member = "allUsers"` - Grants public internet access
-2. **Hardcoded Secrets**: Plain text credentials like `JWT_SECRET = "T2BYL6#]zc>Byuzu"`
-3. **Network Exposure**: `source_ranges = ["0.0.0.0/0"]` - Allows access from any IP
-4. **IAM Overprivilege**: `roles/owner` or `roles/editor` - Excessive permissions
-5. **Public Cloud Functions**: `member = "allUsers"` on function IAM bindings
-6. **Insecure CORS**: `origin = ["*"]` - Allows any origin
-7. **Excessive OAuth Scopes**: `cloud-platform` or `compute-rw` scopes
-8. **Insecure VM Operations**: Startup scripts downloading from public sources
+2. **Network Exposure**: `source_ranges = ["0.0.0.0/0"]` - Allows access from any IP
+3. **IAM Overprivilege**: `roles/owner` or `roles/editor` - Excessive permissions
+4. **Public Cloud Functions**: `member = "allUsers"` on function IAM bindings
+5. **Insecure CORS**: `origin = ["*"]` - Allows any origin
+6. **Excessive OAuth Scopes**: `cloud-platform` or `compute-rw` scopes
+
+**AWS-Specific Patterns:**
+1. **Public EC2**: `associate_public_ip_address = true` - EC2 with public IPs
+2. **Open Security Groups**: `cidr_blocks = ["0.0.0.0/0"]` - Unrestricted access
+3. **Public S3**: `block_public_acls = false` - S3 buckets allowing public access
+4. **Public RDS**: `publicly_accessible = true` - Database exposed to internet
+5. **Wildcard IAM**: `Action = "*"` with `Resource = "*"` - Excessive permissions
+6. **Lambda Limits**: `reserved_concurrent_executions = -1` - No concurrency limits
+
+**Universal Patterns:**
+1. **Hardcoded Secrets**: Plain text credentials like `JWT_SECRET = "T2BYL6#]zc>Byuzu"`
+2. **Insecure VM Operations**: Startup scripts downloading from public sources
+3. **Missing Encryption**: `encryption = false` or `kms_key_id = null`
 
 **ENHANCED ANALYSIS REQUIREMENTS:**
 - Use semantic similarity matching to find vulnerability patterns
@@ -403,6 +477,7 @@ Provide a thorough, actionable security assessment with specific evidence and re
             report = f"""# 🛡️ Enhanced Terraform Security Analysis Report
 
 **Project:** {self.project_id}
+**Cloud Provider:** {self.provider}
 **Analysis Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 **Analysis Method:** Enhanced LlamaIndex RAG + ChromaDB Vector Store + Security Knowledge Base
 **Model:** Gemini 2.0 Flash (Temperature: 0.1)
@@ -489,13 +564,14 @@ The following security patterns were used for enhanced detection:
 
 def main():
     """Main entry point for enhanced security scanner"""
-    if len(sys.argv) != 4:
-        print("Usage: python3 enhanced_gemini_security_scanner.py <project_id> <terraform_dir> <api_key>")
+    if len(sys.argv) not in [4, 5]:
+        print("Usage: python3 enhanced_gemini_security_scanner.py <project_id> <terraform_dir> <api_key> [provider]")
         sys.exit(1)
     
     project_id = sys.argv[1]
     terraform_dir = sys.argv[2] 
     api_key = sys.argv[3]
+    provider = sys.argv[4] if len(sys.argv) == 5 else "AWS"
     
     # Validate inputs
     if not project_id.strip():
@@ -519,7 +595,7 @@ def main():
     print(f"🔍 Found {len(terraform_files)} Terraform files to analyze")
     
     # Run enhanced security analysis
-    scanner = ModernGeminiSecurityScanner(project_id, terraform_dir, api_key)
+    scanner = ModernGeminiSecurityScanner(project_id, terraform_dir, api_key, provider)
     
     try:
         output_file = asyncio.run(scanner.run_enhanced_security_analysis())

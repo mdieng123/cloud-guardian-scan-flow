@@ -129,7 +129,7 @@ How can I help you today?`,
         formData.append('document', file);
         formData.append('geminiApiKey', geminiApiKey);
 
-        const response = await fetch('/api/upload-document', {
+        const response = await fetch('http://localhost:3001/api/upload-document', {
           method: 'POST',
           body: formData
         });
@@ -203,7 +203,7 @@ How can I help you today?`,
     setMessages(prev => [...prev, typingMessage]);
 
     try {
-      const response = await fetch('/api/security-chat', {
+      const response = await fetch('http://localhost:3001/api/security-chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

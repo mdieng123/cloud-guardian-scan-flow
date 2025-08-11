@@ -20,45 +20,18 @@ const ResultsViewer: React.FC<ResultsViewerProps> = ({ results }) => {
   const downloadFinalSecurityReport = async () => {
     try {
       console.log('Attempting to download final security report...');
-      const response = await fetch('/api/download-final-report');
       
-      console.log('Response status:', response.status, response.statusText);
+      // Create a direct link to download the file
+      const link = document.createElement('a');
+      link.href = 'http://localhost:3001/api/download-final-report';
+      link.download = `final_security_report_${new Date().toISOString().split('T')[0]}.md`;
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.warn('Final security report not available:', response.status, errorText);
-        downloadFallbackReport();
-        return;
-      }
+      // Append to body temporarily and trigger download
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
       
-      // Get the filename from the response headers or use a default
-      const contentDisposition = response.headers.get('content-disposition');
-      let filename = `final_security_report_${new Date().toISOString().split('T')[0]}.md`;
-      
-      console.log('Content-Disposition header:', contentDisposition);
-      
-      if (contentDisposition) {
-        const filenameMatch = contentDisposition.match(/filename="([^"]+)"/);
-        if (filenameMatch) {
-          filename = filenameMatch[1];
-          console.log('Extracted filename:', filename);
-        }
-      }
-      
-      // Download the file
-      const blob = await response.blob();
-      console.log('Blob size:', blob.size);
-      
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      
-      console.log('Download completed successfully');
+      console.log('Download triggered successfully');
       
     } catch (error) {
       console.error('Error downloading final security report:', error);

@@ -462,24 +462,48 @@ function launch_prowler_scan_only() {
         return 1
     fi
     
-    echo -e "${YELLOW}Running Prowler scan for project: ${project_id}${NC}"
-    echo "This may take several minutes..."
-    echo ""
-    
     # Create output filename with timestamp
     local prowler_output="prowler_scan_$(date +%Y%m%d_%H%M%S)"
     
-    # Run prowler scan
-    echo -e "${YELLOW}Executing: prowler gcp --project-ids ${project_id} --output-formats json-ocsf --output-filename ${prowler_output} --output-directory output${NC}"
+    # Ensure output directory exists
+    mkdir -p output
+    
+    # Build prowler command based on cloud provider
+    local prowler_command=""
+    case "${CLOUD_PROVIDER}" in
+        "GCP")
+            echo -e "${YELLOW}Running Prowler scan for GCP project: ${project_id}${NC}"
+            prowler_command="prowler gcp --project-ids ${project_id} --output-formats json-ocsf --output-filename ${prowler_output} --output-directory output"
+            ;;
+        "AWS")
+            echo -e "${YELLOW}Running Prowler scan for AWS${NC}"
+            # Use AWS_DEFAULT_REGION if set, otherwise default to us-east-1
+            local aws_region="${AWS_DEFAULT_REGION:-${AWS_REGION:-us-east-1}}"
+            echo -e "${BLUE}Using AWS region: ${aws_region}${NC}"
+            prowler_command="prowler aws --region ${aws_region} --output-formats json-ocsf --output-filename ${prowler_output} --output-directory output"
+            ;;
+        "AZURE")
+            echo -e "${YELLOW}Running Prowler scan for Azure${NC}"
+            prowler_command="prowler azure --output-formats json-ocsf --output-filename ${prowler_output} --output-directory output"
+            ;;
+        *)
+            echo -e "${RED}✗ Unsupported cloud provider: ${CLOUD_PROVIDER}${NC}"
+            return 1
+            ;;
+    esac
+    
+    echo "This may take several minutes..."
+    echo ""
+    echo -e "${YELLOW}Executing: ${prowler_command}${NC}"
     
     # Run prowler and capture exit code
-    prowler gcp --project-ids "$project_id" --output-formats json-ocsf --output-filename "$prowler_output" --output-directory output
+    eval "$prowler_command"
     local prowler_exit_code=$?
     
     # Prowler exit codes: 0 = success, 3 = success but found issues, others = failure
     if [[ $prowler_exit_code -eq 0 ]] || [[ $prowler_exit_code -eq 3 ]]; then
         echo -e "${GREEN}✓ Prowler scan completed successfully!${NC}"
-        echo -e "Raw output saved to: ${BLUE}${prowler_output}${NC}"
+        echo -e "Raw output saved to: ${BLUE}output/${prowler_output}.ocsf.json${NC}"
         echo ""
         
         # Clean the JSON output
@@ -491,7 +515,7 @@ function launch_prowler_scan_only() {
             return 1
         fi
     else
-        echo -e "${RED}✗ Prowler scan failed!${NC}"
+        echo -e "${RED}✗ Prowler scan failed with exit code: ${prowler_exit_code}${NC}"
         return 1
     fi
 }
@@ -521,22 +545,51 @@ function launch_prowler_scan() {
         return 1
     fi
     
-    echo -e "${YELLOW}Running Prowler scan for project: ${project_id}${NC}"
-    echo "This may take several minutes..."
-    echo ""
-    
     # Create output filename with timestamp
     local prowler_output="prowler_scan_$(date +%Y%m%d_%H%M%S)"
     
-    # Run prowler scan
-    echo -e "${YELLOW}Executing: prowler gcp --project-ids ${project_id} --output-formats json-ocsf --output-filename ${prowler_output} --output-directory output${NC}"
+    # Ensure output directory exists
+    mkdir -p output
     
-    prowler gcp --project-ids "$project_id" --output-formats json-ocsf --output-filename "$prowler_output" --output-directory output
-    echo -e "${GREEN}✓ Prowler scan completed successfully!${NC}"
-    echo -e "Raw output saved to: ${BLUE}${prowler_output}${NC}"
+    # Build prowler command based on cloud provider
+    local prowler_command=""
+    case "${CLOUD_PROVIDER}" in
+        "GCP")
+            echo -e "${YELLOW}Running Prowler scan for GCP project: ${project_id}${NC}"
+            prowler_command="prowler gcp --project-ids ${project_id} --output-formats json-ocsf --output-filename ${prowler_output} --output-directory output"
+            ;;
+        "AWS")
+            echo -e "${YELLOW}Running Prowler scan for AWS${NC}"
+            # Use AWS_DEFAULT_REGION if set, otherwise default to us-east-1
+            local aws_region="${AWS_DEFAULT_REGION:-${AWS_REGION:-us-east-1}}"
+            echo -e "${BLUE}Using AWS region: ${aws_region}${NC}"
+            prowler_command="prowler aws --region ${aws_region} --output-formats json-ocsf --output-filename ${prowler_output} --output-directory output"
+            ;;
+        "AZURE")
+            echo -e "${YELLOW}Running Prowler scan for Azure${NC}"
+            prowler_command="prowler azure --output-formats json-ocsf --output-filename ${prowler_output} --output-directory output"
+            ;;
+        *)
+            echo -e "${RED}✗ Unsupported cloud provider: ${CLOUD_PROVIDER}${NC}"
+            return 1
+            ;;
+    esac
+    
+    echo "This may take several minutes..."
     echo ""
+    echo -e "${YELLOW}Executing: ${prowler_command}${NC}"
+    
+    # Run prowler command
+    eval "$prowler_command"
+    local prowler_exit_code=$?
+    
+    # Check exit code
+    if [[ $prowler_exit_code -eq 0 ]] || [[ $prowler_exit_code -eq 3 ]]; then
+        echo -e "${GREEN}✓ Prowler scan completed successfully!${NC}"
+        echo -e "Raw output saved to: ${BLUE}output/${prowler_output}.ocsf.json${NC}"
+        echo ""
         
-            # Clean the JSON output
+        # Clean the JSON output
         clean_prowler_json "output/$prowler_output.ocsf.json"
         
         # Launch consolidation analysis if both files are available
@@ -550,7 +603,10 @@ function launch_prowler_scan() {
         fi
         
         return 0
-   
+    else
+        echo -e "${RED}✗ Prowler scan failed with exit code: ${prowler_exit_code}${NC}"
+        return 1
+    fi
 }
 
 #######################################
@@ -823,10 +879,10 @@ function launch_gemini_security_scanner() {
    # Run with virtual environment if available
    if [[ -d "llama_env" ]]; then
        echo -e "${BLUE}Activating LlamaIndex virtual environment...${NC}"
-       source llama_env/bin/activate && python3 "gemini_security_scanner.py" "$vertex_project_id" "$LAST_EXPORT_DIR" "$gemini_api_key"
+       source llama_env/bin/activate && python3 "gemini_security_scanner.py" "$vertex_project_id" "$LAST_EXPORT_DIR" "$gemini_api_key" "$CLOUD_PROVIDER"
    else
        echo -e "${YELLOW}⚠ Virtual environment not found, using system Python${NC}"
-       python3 "gemini_security_scanner.py" "$vertex_project_id" "$LAST_EXPORT_DIR" "$gemini_api_key"
+       python3 "gemini_security_scanner.py" "$vertex_project_id" "$LAST_EXPORT_DIR" "$gemini_api_key" "$CLOUD_PROVIDER"
    fi
    local scanner_exit_code=$?
 

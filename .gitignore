@@ -22,3 +22,42 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python virtual environments
+llama_env/
+venv/
+env/
+
+# ChromaDB vector store databases (contains provider-specific cached data)
+chroma_security_db/
+*.sqlite3
+
+# Security analysis output files
+enhanced_security_analysis_*.txt
+final_security_report_*.md
+prowler_scan_*.json
+prowler_scan_*.ocsf_cleaned.json
+consolidated_security_report_*.md
+
+# Export directories
+gcp_export_*/
+aws_export_*/
+azure_export_*/
+exports/
+output/
+tftest/generated/
+
+# Terraform files
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+.terraformrc
+terraform.rc
+
+# Upload directories
+uploads/
+
+# Test files
+test_provider_isolation.py

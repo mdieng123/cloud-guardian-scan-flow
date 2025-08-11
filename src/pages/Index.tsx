@@ -315,7 +315,7 @@ const Index = () => {
                   <div className="pt-2">
                     <h4 className="font-medium text-gray-900 mb-2">Key Features:</h4>
                     <ul className="space-y-1 text-gray-600">
-                      <li>• GCP & Azure Terraform export</li>
+                      <li>• AWS, GCP, & Azure Terraform export</li>
                       <li>• Gemini AI security analysis</li>
                       <li>• Prowler security scanning</li>
                       <li>• Consolidated vulnerability reports</li>

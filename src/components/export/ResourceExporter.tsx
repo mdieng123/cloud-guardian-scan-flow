@@ -29,6 +29,8 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
   const [projectId, setProjectId] = useState('');
   const [resourceGroup, setResourceGroup] = useState('');
   const [awsRegion, setAwsRegion] = useState('us-east-1');
+  const [awsResources, setAwsResources] = useState('vpc,subnet,ec2_instance,security_group');
+  const [vpcIds, setVpcIds] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState(0);
   const [exportStatus, setExportStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle');
@@ -41,11 +43,11 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
   // Check for latest export when component mounts
   useEffect(() => {
     const checkLatestExport = async () => {
-      // Skip API call for AWS since backend doesn't support it yet
-      if (provider === 'AWS') {
-        setIsCheckingLatest(false);
-        return;
-      }
+      // AWS is now supported
+      // if (provider === 'AWS') {
+      //   setIsCheckingLatest(false);
+      //   return;
+      // }
       
       try {
         setIsCheckingLatest(true);
@@ -97,7 +99,9 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
           projectId: actualProjectId,
           resourceGroup: provider === 'AZURE' ? resourceGroup : undefined,
           exportPath: data.exportDir,
-          fileName: provider === 'GCP' ? 'gcp_resources.txt' : 'azure_resources.txt',
+          fileName: provider === 'GCP' ? 'gcp_resources.txt' : 
+                   provider === 'AZURE' ? 'azure_resources.txt' : 
+                   'generated/aws_consolidated.txt',
           fileSize: 'Unknown',
           lineCount: 'Unknown',
           resources: 'Unknown',
@@ -164,16 +168,6 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
       return;
     }
 
-    // Skip API call for AWS since backend doesn't support it yet
-    if (provider === 'AWS') {
-      toast({
-        title: "AWS Export Not Available",
-        description: "AWS export functionality is not yet implemented.",
-        variant: "destructive"
-      });
-      return;
-    }
-
     try {
       setIsExporting(true);
       setExportStatus('running');
@@ -183,7 +177,10 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
       await api.exportResources({
         provider: provider!,
         projectId: provider === 'GCP' ? projectId : undefined,
-        resourceGroup: provider === 'AZURE' ? resourceGroup : undefined
+        resourceGroup: provider === 'AZURE' ? resourceGroup : undefined,
+        awsRegion: provider === 'AWS' ? awsRegion : undefined,
+        awsResources: provider === 'AWS' ? awsResources : undefined,
+        vpcIds: provider === 'AWS' ? vpcIds : undefined
       });
     } catch (error) {
       setIsExporting(false);
@@ -233,10 +230,11 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
       <div className="text-center">
         <FileText className="h-12 w-12 text-blue-600 mx-auto mb-4" />
         <h2 className="text-2xl font-bold text-gray-900 mb-2">
-          {provider === 'GCP' ? 'GCP' : 'Azure'} Resource Export
+          {provider === 'GCP' ? 'GCP' : provider === 'AZURE' ? 'Azure' : 'AWS'} Resource Export
         </h2>
         <p className="text-gray-600 max-w-md mx-auto">
           Export your cloud resources to Terraform format for security analysis.
+          {provider === 'AWS' && ' Using Terraformer to import existing AWS infrastructure.'}
         </p>
       </div>
 
@@ -352,18 +350,48 @@ const ResourceExporter: React.FC<ResourceExporterProps> = ({ provider, onComplet
               </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              <Label htmlFor="awsRegion">AWS Region</Label>
-              <Input
-                id="awsRegion"
-                placeholder="us-east-1"
-                value={awsRegion}
-                onChange={(e) => setAwsRegion(e.target.value)}
-                disabled={isExporting}
-              />
-              <p className="text-xs text-gray-500">
-                The AWS region containing resources to export
-              </p>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="awsRegion">AWS Region</Label>
+                <Input
+                  id="awsRegion"
+                  placeholder="us-east-1"
+                  value={awsRegion}
+                  onChange={(e) => setAwsRegion(e.target.value)}
+                  disabled={isExporting}
+                />
+                <p className="text-xs text-gray-500">
+                  The AWS region containing resources to export
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="awsResources">Resources to Import</Label>
+                <Input
+                  id="awsResources"
+                  placeholder="vpc,subnet,ec2_instance,security_group"
+                  value={awsResources}
+                  onChange={(e) => setAwsResources(e.target.value)}
+                  disabled={isExporting}
+                />
+                <p className="text-xs text-gray-500">
+                  Comma-separated list of AWS resources (vpc, subnet, ec2_instance, security_group, iam_role, s3_bucket, rds_instance, lambda_function)
+                </p>
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="vpcIds">VPC IDs (Optional)</Label>
+                <Input
+                  id="vpcIds"
+                  placeholder="vpc-12345,vpc-67890"
+                  value={vpcIds}
+                  onChange={(e) => setVpcIds(e.target.value)}
+                  disabled={isExporting}
+                />
+                <p className="text-xs text-gray-500">
+                  Optional: Comma-separated VPC IDs to filter resources. Leave empty to import all resources.
+                </p>
+              </div>
             </div>
           )}
 

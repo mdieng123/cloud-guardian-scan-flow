@@ -3,13 +3,17 @@ const API_BASE = 'http://localhost:3001/api';
 export interface AuthStatus {
   gcp: boolean;
   azure: boolean;
+  aws: boolean;
   isAuthenticated: boolean;
 }
 
 export interface ExportRequest {
-  provider: 'GCP' | 'AZURE';
+  provider: 'GCP' | 'AZURE' | 'AWS';
   projectId?: string;
   resourceGroup?: string;
+  awsRegion?: string;
+  awsResources?: string;
+  vpcIds?: string;
 }
 
 export interface ExportResult {
@@ -22,7 +26,7 @@ export interface ExportResult {
 
 export interface ScanRequest {
   exportDir: string;
-  provider: 'GCP' | 'AZURE';
+  provider: 'GCP' | 'AZURE' | 'AWS';
   projectId?: string;
 }
 
@@ -70,7 +74,7 @@ export const api = {
     return response.json();
   },
 
-  async checkLatestExport(provider: 'GCP' | 'AZURE') {
+  async checkLatestExport(provider: 'GCP' | 'AZURE' | 'AWS') {
     const response = await fetch(`${API_BASE}/check-latest-export`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

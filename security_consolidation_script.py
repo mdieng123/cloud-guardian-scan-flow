@@ -32,9 +32,22 @@ class SecurityConsolidator:
         self.llm = GoogleGenAI(
             model="gemini-2.0-flash",
             api_key=self.api_key,
-            max_tokens=32000,
+            max_tokens=8000,  # Reduced to prevent MAX_TOKENS error
             temperature=0.1
         )
+    
+    def _truncate_text(self, text: str, max_chars: int) -> str:
+        """Truncate text to maximum characters to prevent token limit issues"""
+        if len(text) <= max_chars:
+            return text
+        
+        truncated = text[:max_chars]
+        # Try to cut at a reasonable boundary
+        last_newline = truncated.rfind('\n')
+        if last_newline > max_chars * 0.8:  # If we can find a newline in the last 20%
+            truncated = truncated[:last_newline]
+        
+        return truncated + f"\n\n... [TRUNCATED - Original length: {len(text)} chars, showing first {len(truncated)} chars]"
     
     def find_prowler_results(self) -> Optional[str]:
         """Find the most recent cleaned Prowler JSON results file"""
@@ -137,15 +150,15 @@ class SecurityConsolidator:
 **Priority:** HIGH (Primary analysis source)
 **Content:**
 ```
-{gemini_data.get('data', 'No Gemini data available') if gemini_data else 'No Gemini analysis available'}
+{self._truncate_text(gemini_data.get('data', 'No Gemini data available') if gemini_data else 'No Gemini analysis available', 4000)}
 ```
 
 ### 2. PROWLER SECURITY FINDINGS  
 **Source:** Automated compliance and security checker
 **Priority:** MEDIUM (Verification and additional findings)
-**Content:**
+**Content:** {len(prowler_data.get('data', [])) if prowler_data and prowler_data.get('data') else 0} findings
 ```json
-{json.dumps(prowler_data.get('data', {}), indent=2) if prowler_data and prowler_data.get('data') else 'No Prowler data available'}
+{self._truncate_text(json.dumps(prowler_data.get('data', []), indent=2) if prowler_data and prowler_data.get('data') else 'No Prowler data available', 2000)}
 ```
 
 ## CONSOLIDATION REQUIREMENTS:
