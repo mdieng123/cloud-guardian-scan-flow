@@ -1,3 +1,5 @@
+video demo: https://drive.google.com/file/d/1ckZqZ-FHHKl7o-rUabRLoJlL3HTPZ0Cw/view?usp=sharing
+
 # GEMINI VAULT
 IMPORTANT:DELETE CHROMBDB AND EXPORT FILES AFTER EACH RUN TO NOT MIX UP FINDINGS. 
 This is a comprehensive cloud security assessment tool that combines Terraform export capabilities with advanced AI-powered security analysis using Google Gemini and Prowler security scanning.
